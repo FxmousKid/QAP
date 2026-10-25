@@ -1,0 +1,172 @@
+/* QA passes dashboard. Same palette and theme key as the pages (qa-pass.css), so the frame and the
+   dashboard around it read as one thing. Tiles follow the ~/.dotfiles README map: a rounded square in the
+   item's colour, its icon inside, the name right under the icon. */
+:root{
+  color-scheme: light;
+  --bg:#fbfaf8; --surface:#ffffff; --surface2:#f5f3ef; --ink:#14130f; --ink2:#4a4740; --ink3:#7d786d;
+  --rule:#e6e2d9; --rule2:#d3cec2; --gold:#B07D00; --bad:#AF1B3F; --good:#4A7C2F;
+  --shadow:0 1px 2px rgba(20,19,15,.06),0 4px 14px rgba(20,19,15,.08);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --tile:120px; --bar:52px;
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#131211; --surface:#1c1b19; --surface2:#232220; --ink:#f5f3ee; --ink2:#c3bfb4; --ink3:#8e897d;
+  --rule:#2c2a27; --rule2:#3c3935; --gold:#D9A21C; --bad:#E66767; --good:#7FB35C;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+svg{display:block}
+
+/* ===== top bar: brand, breadcrumb, the view's tools, theme ===== */
+.bar{position:sticky;top:0;z-index:20;height:var(--bar);display:flex;align-items:center;gap:10px;padding:0 14px;
+  background:color-mix(in oklab,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--rule)}
+.brand{display:flex;align-items:center;gap:8px;font:650 .95rem/1 var(--mono);letter-spacing:.02em;white-space:nowrap;
+  padding:6px 8px;border-radius:8px}
+.brand svg{width:20px;height:20px;fill:var(--gold)}
+.brand:hover{background:var(--surface2)}
+.crumbs{display:flex;align-items:center;gap:2px;min-width:0;overflow:hidden;white-space:nowrap}
+.crumbs a,.crumbs span{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;color:var(--ink2);
+  font-size:.92rem;max-width:22ch;overflow:hidden;text-overflow:ellipsis}
+.crumbs a:hover{background:var(--surface2);color:var(--ink)}
+.crumbs .sep{color:var(--ink3);padding:0 1px}
+.crumbs .here{color:var(--ink);font-weight:600}
+.crumbs .gl{font-size:1rem;line-height:1}
+.crumbs .gl svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tools{flex:1;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.iconbtn,.btn{border:1px solid var(--rule2);background:var(--surface);border-radius:999px;cursor:pointer;color:var(--ink2);
+  padding:6px 12px;font:600 .78rem/1 var(--mono);white-space:nowrap}
+.iconbtn{padding:6px 10px}
+.iconbtn:hover,.btn:hover{border-color:var(--gold);color:var(--ink)}
+.btn.primary{background:var(--gold);border-color:var(--gold);color:#fff}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
+[data-drop-ok]{outline:2px dashed var(--gold);outline-offset:2px;background:color-mix(in oklab,var(--gold) 12%,transparent)}
+
+/* ===== folder view: groups of tiles, centred like the dotfiles map ===== */
+.folder{max-width:1100px;margin:0 auto;padding:28px 16px 80px}
+.folder-head{display:flex;align-items:center;gap:14px;margin:6px 0 22px;flex-wrap:wrap;justify-content:center;text-align:center}
+.folder-head h1{margin:0;font-size:1.6rem;letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.folder-head .meta{width:100%;margin:0;color:var(--ink3);font:500 .78rem/1.4 var(--mono)}
+.group{margin:30px 0 12px;text-align:center;font:600 .72rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+.tiles{display:flex;flex-wrap:wrap;justify-content:center;gap:26px 22px}
+.empty{color:var(--ink3);text-align:center;margin:40px auto;max-width:44ch}
+
+.tile-wrap{position:relative;isolation:isolate;width:calc(var(--tile) + 16px);display:flex;flex-direction:column;align-items:center}
+.tile{position:relative;width:var(--tile);height:var(--tile);border-radius:calc(var(--tile) * .22);background:var(--tile-bg,#5E60CE);
+  color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px 10px 10px;
+  box-shadow:var(--shadow);transition:transform .12s ease,box-shadow .12s ease;cursor:pointer;user-select:none;-webkit-user-select:none}
+.tile:hover{transform:translateY(-2px)}
+.tile:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.tile .glyph{height:46px;display:flex;align-items:center;justify-content:center;font-size:40px;line-height:1}
+.tile .glyph svg{width:42px;height:42px;stroke:#fff;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tile .label{font:650 .8rem/1.2 ui-sans-serif,system-ui,-apple-system,sans-serif;text-align:center;max-width:100%;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 1px rgba(0,0,0,.18)}
+/* a folder: a tab on its top edge and a second sheet behind, so folders and subjects never look alike */
+.tile.is-folder::before{content:"";position:absolute;left:14%;top:-7px;width:36%;height:12px;border-radius:7px 7px 0 0;background:inherit;filter:brightness(.88)}
+.tile-wrap.is-folder::before{content:"";position:absolute;top:6px;left:14px;width:var(--tile);height:var(--tile);
+  border-radius:calc(var(--tile) * .22);background:var(--tile-bg,#5E60CE);filter:brightness(.7);opacity:.5}
+.tile .badge{position:absolute;top:-7px;right:-7px;min-width:24px;height:24px;padding:0 7px;border-radius:12px;background:var(--surface);
+  color:var(--ink);font:700 .72rem/24px var(--mono);text-align:center;box-shadow:var(--shadow);border:1px solid var(--rule)}
+.under{margin-top:9px;font:500 .72rem/1.35 var(--mono);color:var(--ink3);text-align:center;max-width:100%;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.under .kids{letter-spacing:1px}
+.tile-wrap .more{position:absolute;top:2px;left:4px;width:26px;height:26px;border-radius:8px;border:0;background:rgba(0,0,0,.22);
+  color:#fff;cursor:pointer;opacity:0;transition:opacity .12s;font:700 .9rem/26px var(--mono);padding:0}
+.tile-wrap:hover .more,.tile-wrap:focus-within .more,.more[aria-expanded="true"]{opacity:1}
+@media (hover:none){.tile-wrap .more{opacity:.9}}
+.tile-wrap.dragging{opacity:.4}
+.tile-wrap[data-drop-ok]{outline:none;background:none}
+.tile-wrap[data-drop-ok] .tile{outline:3px dashed var(--gold);outline-offset:5px;transform:scale(1.05)}
+
+/* ===== subject view: the pass in a large frame, the pass selector in the bar ===== */
+body.viewing{overflow:hidden}
+.viewer{height:calc(100dvh - var(--bar));display:flex;flex-direction:column}
+.frame{flex:1;width:100%;border:0;background:var(--bg)}
+.passnav{display:flex;align-items:center;gap:6px;min-width:0;flex:1;justify-content:flex-end}
+.passnav .step{width:30px;height:30px;padding:0;border-radius:999px;font-size:1rem;line-height:1}
+.pick{display:inline-flex;align-items:center;gap:6px}
+.pick small{color:var(--ink3);font-weight:500}
+.strip{display:flex;gap:3px;overflow-x:auto;scrollbar-width:thin;min-width:0;max-width:min(52vw,760px);padding:3px 2px;
+  scroll-behavior:smooth;mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+.strip a{flex:none;min-width:28px;height:26px;padding:0 6px;border-radius:7px;display:flex;align-items:center;justify-content:center;
+  font:600 .74rem/1 var(--mono);color:var(--ink3);border:1px solid transparent}
+.strip a:hover{color:var(--ink);border-color:var(--rule2)}
+.strip a[aria-current="true"]{background:var(--gold);color:#fff}
+.open-page{font-size:.95rem}
+
+/* the searchable pass list */
+.popover{position:fixed;z-index:40;width:min(560px,calc(100vw - 24px));max-height:min(70vh,640px);display:flex;flex-direction:column;
+  background:var(--surface);border:1px solid var(--rule2);border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.28);overflow:hidden}
+.popover input{border:0;border-bottom:1px solid var(--rule);background:transparent;padding:12px 14px;font:inherit;color:var(--ink);outline:none}
+.popover .list{overflow:auto;padding:4px 0}
+.prow{all:unset;box-sizing:border-box;width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:baseline;
+  padding:7px 14px;cursor:pointer}
+.prow b{font:700 .8rem/1.3 var(--mono);color:var(--gold);min-width:2.4em}
+.prow .t{font-size:.88rem;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow .d{font:500 .72rem/1.3 var(--mono);color:var(--ink3)}
+.prow[aria-selected="true"],.prow:hover{background:var(--surface2)}
+.prow.current .t{color:var(--ink);font-weight:600}
+.popover .none{padding:16px;color:var(--ink3)}
+
+/* ===== menus, dialogs, toast ===== */
+.menu{position:fixed;z-index:45;min-width:200px;background:var(--surface);border:1px solid var(--rule2);border-radius:12px;padding:5px;
+  box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.menu button{all:unset;box-sizing:border-box;display:block;width:100%;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.88rem}
+.menu button:hover,.menu button:focus-visible{background:var(--surface2)}
+.menu hr{border:0;border-top:1px solid var(--rule);margin:4px 2px}
+dialog.dlg{border:1px solid var(--rule2);border-radius:16px;background:var(--surface);color:var(--ink);padding:0;width:min(520px,94vw);
+  box-shadow:0 18px 60px rgba(0,0,0,.3)}
+dialog.dlg::backdrop{background:rgba(10,9,8,.45)}
+.dlg form{display:flex;flex-direction:column;gap:14px;padding:18px 20px}
+.dlg h2{margin:0;font-size:1.05rem}
+.dlg label{display:flex;flex-direction:column;gap:6px;font:600 .72rem/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.dlg input[type=text]{font:inherit;font-size:.95rem;text-transform:none;letter-spacing:0;color:var(--ink);background:var(--bg);
+  border:1px solid var(--rule2);border-radius:10px;padding:9px 11px}
+.dlg input[type=text]:focus{outline:2px solid var(--gold);outline-offset:0}
+.dlg .row{display:flex;gap:8px;justify-content:flex-end}
+.dlg .err{color:var(--bad);font-size:.85rem;min-height:1em;margin:0}
+.picker{display:flex;flex-direction:column;gap:10px}
+.picker .preview{display:flex;justify-content:center}
+.picker .preview .tile{--tile:88px;cursor:default}
+.picker .preview .tile .glyph{height:34px;font-size:30px}
+.picker .preview .tile .glyph svg{width:32px;height:32px}
+.icons{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:6px;max-height:190px;overflow:auto;padding:2px}
+.icons button{width:38px;height:38px;border-radius:10px;border:2px solid transparent;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;padding:0;color:#fff}
+.icons button svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.icons button[aria-pressed="true"]{border-color:var(--ink);box-shadow:0 0 0 2px var(--surface) inset}
+.swatches{display:flex;flex-wrap:wrap;gap:6px}
+.swatches button{width:24px;height:24px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
+.swatches button[aria-pressed="true"]{border-color:var(--ink)}
+.swatches .auto{background:conic-gradient(#5E60CE,#0F8B8D,#F46D01,#D6304F,#5E60CE)}
+.folders-list{max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.folders-list button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:.92rem}
+.folders-list button:hover:not([disabled]),.folders-list button:focus-visible{background:var(--surface2)}
+.folders-list button[disabled]{opacity:.4;cursor:default}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;pointer-events:none;z-index:50;display:flex;gap:12px;
+  align-items:center;background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 14px;font-size:.88rem;transition:.18s ease;
+  max-width:calc(100vw - 24px)}
+.toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.toast.err{background:var(--bad);color:#fff}
+.toast button{all:unset;cursor:pointer;font-weight:700;text-decoration:underline}
+
+/* ===== narrow screens ===== */
+@media (max-width:760px){
+  :root{--tile:96px;--bar:auto}
+  .bar{height:auto;flex-wrap:wrap;padding:8px 10px;row-gap:6px}
+  .brand span{display:none}
+  .crumbs{flex:1}
+  .tools{order:3;flex-basis:100%;justify-content:flex-start}
+  .strip{display:none}
+  .passnav{justify-content:space-between}
+  .viewer{height:calc(100dvh - var(--bar-h, 96px))}
+  .tiles{gap:20px 12px}
+  .tile .glyph{height:38px;font-size:32px}
+  .tile .glyph svg{width:34px;height:34px}
+  .tile .label{font-size:.74rem}
+}

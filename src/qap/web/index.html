@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QA passes</title>
+<link rel="icon" href="/ui/favicon.svg" type="image/svg+xml">
+<script>
+  // The theme before the first paint; the key is the pages' own (qa-theme), so one choice holds everywhere.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("qa-theme"); } catch (e) {}
+    if (!t) t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="stylesheet" href="/ui/style.css">
+<script type="module" src="/ui/app.js"></script>
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="#/" title="All QA passes" data-drop-path="">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+    <span>QA passes</span>
+  </a>
+  <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+  <div class="tools" id="tools"></div>
+  <button class="iconbtn" id="theme" type="button" title="Light or dark (shared with the pages)" aria-label="Toggle dark mode"></button>
+</header>
+<main id="view" tabindex="-1"></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
