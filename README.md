@@ -12,16 +12,16 @@ This repo holds three things:
 | The dashboard | `src/qap/web/` + `qap serve` | Icon tiles for folders and subjects, a pass viewer with a selector made for 40+ passes |
 
 The passes themselves are not here. They live in the content root, by default
-`~/Desktop/Dev/ai/QAP/qa-pass-content` (its own folder, not in git).
+`~/Desktop/Dev/ai/QAP/contents` (its own folder, not in git).
 
 ## Run it
 
 Nothing to install: the CLI is Python standard library only.
 
 ```bash
-~/Desktop/Dev/ai/QAP/qa-pass/bin/qap list            # python3 >= 3.10, else falls back to uv run
-uv run --project ~/Desktop/Dev/ai/QAP/qa-pass qap list
-uv tool install ~/Desktop/Dev/ai/QAP/qa-pass         # optional: a `qap` on your PATH
+~/Desktop/Dev/ai/QAP/QAP/bin/qap list           # python3 >= 3.10, else falls back to uv run
+uv run --project ~/Desktop/Dev/ai/QAP/QAP qap list
+uv tool install ~/Desktop/Dev/ai/QAP/QAP         # optional: a `qap` on your PATH
 ```
 
 Then `qap serve --open` and browse every pass at <http://127.0.0.1:8750>.
@@ -29,7 +29,7 @@ Then `qap serve --open` and browse every pass at <http://127.0.0.1:8750>.
 ## The content layout
 
 ```
-qa-pass-content/
+contents/
   <folder>/                    any depth; a folder holds folders and subjects
     folder.json                optional {title, icon, color, order}
     <subject>/                 one conversation thread
@@ -85,9 +85,9 @@ $ qap next rbac --json
   "ok": true,
   "subject": "authz/rbac",
   "n": 43,
-  "src": "/Users/iyan/Desktop/Dev/ai/QAP/qa-pass-content/authz/rbac/QA-PASS-43.src.html",
-  "html": "/Users/iyan/Desktop/Dev/ai/QAP/qa-pass-content/authz/rbac/QA-PASS-43.html",
-  "img": "/Users/iyan/Desktop/Dev/ai/QAP/qa-pass-content/authz/rbac/img",
+  "src": "/Users/iyan/Desktop/Dev/ai/QAP/contents/authz/rbac/QA-PASS-43.src.html",
+  "html": "/Users/iyan/Desktop/Dev/ai/QAP/contents/authz/rbac/QA-PASS-43.html",
+  "img": "/Users/iyan/Desktop/Dev/ai/QAP/contents/authz/rbac/img",
   "carry_from": null
 }
 ```

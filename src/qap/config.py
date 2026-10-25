@@ -4,7 +4,7 @@ content_root, first match wins:
   1. --root on the command line (passed in as `override`)
   2. the QAP_CONTENT_ROOT environment variable
   3. ~/.config/qap/config.json  {"content_root": "..."}
-  4. ~/Desktop/Dev/ai/QAP/qa-pass-content
+  4. ~/Desktop/Dev/ai/QAP/contents
 
 skill_dir (build.py, check.py, carry.py, the template), first match wins:
   1. the QAP_SKILL_DIR environment variable
@@ -18,7 +18,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_ROOT = Path("~/Desktop/Dev/ai/QAP/qa-pass-content")
+DEFAULT_ROOT = Path("~/Desktop/Dev/ai/QAP/contents")
 KEYS = ("content_root", "skill_dir")
 
 

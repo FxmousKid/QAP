@@ -379,8 +379,8 @@ def cmd_serve(args) -> None:
 
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--root", help="content root (default: config, then QAP_CONTENT_ROOT, then "
-                                       "~/Desktop/Dev/ai/QAP/qa-pass-content)")
+    common.add_argument("--root", help="content root (default: QAP_CONTENT_ROOT, then config, then "
+                                       "~/Desktop/Dev/ai/QAP/contents)")
     common.add_argument("--json", action="store_true", help="machine-readable output, no prompts")
     common.add_argument("--yes", "-y", action="store_true", help="no prompts, no confirmations")
 

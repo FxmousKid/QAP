@@ -79,7 +79,7 @@ unavailable, failing, unauthenticated or timing out, tell the user, every time:*
 Every QA pass lives in one content tree, browsed in a dashboard (`qap serve`):
 
 ```
-~/Desktop/Dev/ai/QAP/qa-pass-content/      (qap config content_root; QAP_CONTENT_ROOT wins)
+~/Desktop/Dev/ai/QAP/contents/      (qap config content_root; QAP_CONTENT_ROOT wins)
   <folder>/ …                              folders nest; folder.json {title, icon, order}
     <subject>/                             subject.json {title, icon, qa_project, sources, created}
       QA-PASS-N.src.html                   ← you edit this (qap carry writes it)
@@ -87,13 +87,13 @@ Every QA pass lives in one content tree, browsed in a dashboard (`qap serve`):
       QA-PASS-N.html                       ← built, self-contained, the file you hand over
 ```
 
-`qap` (repo `~/Desktop/Dev/ai/QAP/qa-pass`, run `~/Desktop/Dev/ai/QAP/qa-pass/bin/qap …`, or
-`uv run --project ~/Desktop/Dev/ai/QAP/qa-pass qap …`) places and builds passes. Agents: always pass every
+`qap` (repo `~/Desktop/Dev/ai/QAP/QAP`, run `~/Desktop/Dev/ai/QAP/QAP/bin/qap …`, or
+`uv run --project ~/Desktop/Dev/ai/QAP/QAP qap …`) places and builds passes. Agents: always pass every
 argument and `--json`; it never prompts then. A subject is named by its path (`db-migration-v3/interaction`)
 or, when unique, its folder name, title or qa-project.
 
 ```bash
-Q=~/Desktop/Dev/ai/QAP/qa-pass/bin/qap
+Q=~/Desktop/Dev/ai/QAP/QAP/bin/qap
 $Q list --json                         # folders, subjects, pass counts: find the subject first
 $Q where interaction --json            # its folder, qa-project, latest pass, next pass number and file names
 $Q new-subject db-migration-v3/billing --title "Billing (PRD-120)" --icon 💳 --qa-project v3-billing --json
