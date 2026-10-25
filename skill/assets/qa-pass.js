@@ -1,6 +1,6 @@
 // QA pass page behaviour: theme toggle, the contents pane (fixed, never pushes the article) with scroll-spy,
 // screen detection (pixel ratio, width tier, ultrawide), message labels (pass + star on every message) and
-// the "View ★s" dialog, a reference list of starred messages.
+// the "View ★s" dialog, a reference list of starred messages, and the "back to where I clicked" button.
 // The theme, the pane state and the pixel ratio are first applied before paint by the inline boot snippet in
 // <head> (THEME_BOOT in build.py); this file keeps them up to date.
 (function () {
@@ -250,8 +250,10 @@
   function goTo(id, push) {
     var el = document.getElementById(id);
     if (!el) return false;
-    // Pushed before the jump, so the entry the reader leaves keeps the place they clicked from.
-    if (push && history.pushState) { if (location.hash !== "#" + id) history.pushState(null, "", "#" + id); }
+    // Pushed before the jump, so the entry the reader leaves keeps the place they clicked from. The state
+    // carries the depth of the back-to-link stack (origins recorded so far, this jump's included), so the
+    // browser's Back and the button stay in step.
+    if (push && history.pushState) history.pushState({ qaj: origins.length }, "", "#" + id);
     for (var p = el.parentElement; p; p = p.parentElement) { if (p.tagName === "DETAILS") p.open = true; }
     el.scrollIntoView({ behavior: "instant", block: "start" });
     window.scrollBy(0, -60);
@@ -266,6 +268,132 @@
     for (var p = el.parentElement; p; p = p.parentElement) { if (p.tagName === "DETAILS" && !p.open) return true; }
     return false;
   }
+
+  // ---- "back to where I clicked" ----
+  // A jump through an in-page link (or a row of the stars dialog) records where the reader was: the link
+  // itself and its height on the screen. A small, faint button then shows near the top left of the article
+  // (the same row as Contents and View ★s; under Contents on narrow windows). It returns to the link,
+  // opening the folds around it if they were closed, and flashes it. Jumps stack: after one return the
+  // button offers the previous origin, until none is left. It fades out by itself 20 s after the last jump
+  // (hovering it keeps it), and comes back with the next jump. Each jump is a history entry, so the
+  // browser's Back does the same thing. Key: b.
+  var BACK_MS = 20000;
+  var origins = [];          // [{el, top, y}], oldest first
+  var backTimer = 0;
+  var restoringUntil = 0;    // the hashchange that follows a return must not jump again
+
+  function backButton() {
+    var b = document.getElementById("back-to-link");
+    if (b) return b;
+    b = document.createElement("button");
+    b.type = "button";
+    b.id = "back-to-link";
+    b.hidden = true;
+    b.innerHTML = '<span class="bk-arrow" aria-hidden="true">↩</span><span class="bk-text"></span><span class="bk-more"></span>';
+    b.addEventListener("click", goBack);
+    b.addEventListener("mouseenter", function () { clearTimeout(backTimer); b.classList.remove("fading"); });
+    b.addEventListener("mouseleave", function () { if (!b.hidden) armBack(); });
+    document.body.appendChild(b);
+    return b;
+  }
+
+  function placeBack() {
+    // Aligned with the article's text (its left edge plus its padding), never the window's edge.
+    var main = document.querySelector("main");
+    if (!main) return;
+    var left = main.getBoundingClientRect().left + (parseFloat(getComputedStyle(main).paddingLeft) || 0);
+    root.style.setProperty("--back-left", Math.round(left) + "px");
+  }
+
+  function whereIs(el) {
+    // "subject 05", or the title of the section the origin sits in.
+    var h = null;
+    document.querySelectorAll("main h2[id]").forEach(function (h2) {
+      if (h2 === el || (h2.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) h = h2;
+    });
+    if (!h) return "the top";
+    var n = h.querySelector(".n");
+    if (n && /^p\d+$/.test(h.id)) return "subject " + n.textContent.trim();
+    var t = h2Title(h);
+    return t.length > 32 ? t.slice(0, 30) + "…" : t;
+  }
+
+  function readingSpot() {
+    // No link was clicked (a row of the stars dialog): remember the block at the top of the reading area.
+    var main = document.querySelector("main");
+    var x = main ? main.getBoundingClientRect().left + 60 : 80;
+    var hit = document.elementFromPoint(x, Math.min(window.innerHeight - 1, 110));
+    return hit && hit.closest ? hit.closest("p, li, h2, h3, .msg, figure, pre, table, .call, header") : null;
+  }
+
+  function recordOrigin(el) {
+    el = el || readingSpot();
+    origins.push({ el: el, top: el ? el.getBoundingClientRect().top : 0, y: window.scrollY });
+    if (origins.length > 30) origins.shift();
+    showBack();
+  }
+
+  function showBack() {
+    if (!origins.length) return hideBack();
+    var b = backButton();
+    var o = origins[origins.length - 1];
+    b.querySelector(".bk-text").textContent = "Back to " + (o.el ? whereIs(o.el) : "where you were");
+    b.querySelector(".bk-more").textContent = origins.length > 1 ? "+" + (origins.length - 1) : "";
+    b.title = "Return to the link you clicked (b)" + (origins.length > 1 ? "; " + (origins.length - 1) + " more jump(s) before it" : "");
+    placeBack();
+    b.hidden = false;
+    b.classList.remove("fading");
+    armBack();
+  }
+
+  function armBack() {
+    clearTimeout(backTimer);
+    backTimer = setTimeout(function () {
+      var b = document.getElementById("back-to-link");
+      if (!b) return;
+      b.classList.add("fading");
+      backTimer = setTimeout(function () { b.hidden = true; b.classList.remove("fading"); }, 600);
+    }, BACK_MS);
+  }
+
+  function hideBack() {
+    clearTimeout(backTimer);
+    var b = document.getElementById("back-to-link");
+    if (b) { b.hidden = true; b.classList.remove("fading"); }
+  }
+
+  function restore(o) {
+    if (!o) return;
+    restoringUntil = Date.now() + 400;
+    var el = o.el && o.el.isConnected ? o.el : null;
+    if (el) {
+      for (var p = el.parentElement; p; p = p.parentElement) { if (p.tagName === "DETAILS") p.open = true; }
+      window.scrollBy({ top: el.getBoundingClientRect().top - o.top, behavior: "instant" });
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+      if (el.focus && el.tagName === "A") el.focus({ preventScroll: true });
+    } else {
+      window.scrollTo({ top: o.y, behavior: "instant" });
+    }
+    if (origins.length) showBack(); else hideBack();
+  }
+
+  function goBack() {
+    if (!origins.length) return hideBack();
+    // At the entry our last jump made: let history go back too, so Back and Forward stay meaningful.
+    if (history.state && history.state.qaj === origins.length && history.back) { history.back(); return; }
+    restore(origins.pop());
+  }
+
+  window.addEventListener("popstate", function (e) {
+    var depth = e.state && typeof e.state.qaj === "number" ? e.state.qaj : 0;
+    if (depth >= origins.length) return;          // Forward, or an entry that is not ours
+    var o = null;
+    while (origins.length > depth) o = origins.pop();
+    // After the browser's own scroll restoration, which runs after popstate.
+    setTimeout(function () { restore(o); }, 0);
+  });
 
   // ---- the "View ★s" dialog: a reference list, never the full messages ----
   function buildDialog() {
@@ -372,10 +500,15 @@
       if (side && !side.contains(e.target) && e.target !== tocButton && !(tocButton && tocButton.contains(e.target))) setToc(false, false);
     });
     document.addEventListener("keydown", function (e) {
-      // "\" opens or closes the contents, unless typing in a field.
-      if (e.key === "\\" && !/input|textarea|select/i.test((e.target && e.target.tagName) || "")) {
-        setToc(!root.classList.contains("toc-open"), true);
-      }
+      if (/input|textarea|select/i.test((e.target && e.target.tagName) || "") || e.metaKey || e.ctrlKey || e.altKey) return;
+      // "\" opens or closes the contents; "b" goes back to the link last clicked.
+      if (e.key === "\\") setToc(!root.classList.contains("toc-open"), true);
+      if (e.key === "b" && origins.length && !(document.getElementById("stars-dialog") || {}).open) goBack();
+    });
+    window.addEventListener("resize", placeBack, { passive: true });
+    // The theme picked in another pass or in the dashboard around this page (same origin) applies here too.
+    window.addEventListener("storage", function (e) {
+      if (e.key === "qa-theme" && (e.newValue === "dark" || e.newValue === "light") && e.newValue !== root.dataset.theme) setTheme(e.newValue);
     });
 
     spy(buildToc());
@@ -401,7 +534,7 @@
       var go = e.target.closest && e.target.closest("[data-go]");
       if (go && dlg.contains(go)) {
         var id = go.getAttribute("data-go");
-        if (document.getElementById(id)) { dlg.close(); goTo(id); }
+        if (document.getElementById(id)) { dlg.close(); recordOrigin(null); goTo(id, true); }
         return;
       }
       var act = e.target.closest && e.target.closest("[data-act]");
@@ -424,12 +557,14 @@
       var id = decodeURIComponent(a.getAttribute("href").slice(1));
       if (!id || !document.getElementById(id)) return;
       e.preventDefault();
+      recordOrigin(a);
       goTo(id, true);
     });
 
     // Deep links (#p3-1a, or any id inside a closed fold) unfold what hides the target. On Back and Forward,
     // an unfolded target is left to the browser, which puts the reader back where they clicked.
     var openHash = function (onLoad) {
+      if (onLoad !== true && Date.now() < restoringUntil) return;
       var id = decodeURIComponent((location.hash || "").slice(1));
       var el = id && document.getElementById(id);
       if (el && (inClosedFold(el) || (onLoad === true && el.classList.contains("msg")))) goTo(id);

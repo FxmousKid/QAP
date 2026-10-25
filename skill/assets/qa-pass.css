@@ -130,6 +130,27 @@ footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--rule);font-si
 #stars-open .count{font-weight:600;color:var(--ink3);margin-left:4px}
 #theme-toggle{right:calc(var(--edge) + var(--stars-w, 112px) + 8px)}
 
+/* ===== "back to where I clicked": faint until hovered, on the top row at the article's left edge =====
+   qa-pass.js sets --back-left to the article's text edge (so it never sits at the window's edge), shows it
+   after an in-page jump, and fades it out 20 s later. Narrow windows: under the Contents button. */
+#back-to-link{position:fixed;top:14px;left:var(--back-left,var(--edge));z-index:31;display:flex;align-items:center;gap:6px;
+  max-width:min(46ch,calc(100vw - 32px));border:1px solid var(--rule2);border-radius:999px;padding:6px 12px 6px 10px;
+  background:color-mix(in oklab,var(--surface) 82%,transparent);color:var(--ink2);font:600 .75rem/1 var(--mono);
+  cursor:pointer;opacity:.5;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:opacity .2s ease,transform .2s ease;
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:back-in .25s ease}
+#back-to-link[hidden]{display:none}
+#back-to-link:hover,#back-to-link:focus-visible{opacity:1;color:var(--ink);border-color:var(--gold)}
+#back-to-link:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+#back-to-link.fading{opacity:0;transform:translateY(-4px)}
+#back-to-link .bk-arrow{color:var(--gold);font-size:.95rem;line-height:1}
+#back-to-link .bk-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#back-to-link .bk-more:empty{display:none}
+#back-to-link .bk-more{color:var(--ink3);font-weight:500}
+@keyframes back-in{from{opacity:0;transform:translateY(-4px)}}
+a.flash{border-radius:4px}
+@media (max-width:1000px){#back-to-link{top:54px;left:16px}}
+@media print{#back-to-link{display:none}}
+
 /* ===== contents pane: fixed, never part of the article's flow =====
    Wide windows: it sits in the article's reserved left gutter. Narrow windows: it slides over the page. */
 aside.side{position:fixed;top:0;left:max(0px, calc(var(--edge) - 24px));bottom:0;z-index:20;width:calc(var(--side-w) + 32px);
