@@ -1,0 +1,14 @@
+#!/bin/sh
+# qap from the repo, nothing to install: the CLI is stdlib only, so python3 (3.10+) runs it directly.
+# Without a usable python3 it falls back to `uv run --project <repo> qap`.
+# Symlink it onto your PATH if you like:  ln -s "$PWD/bin/qap" ~/.local/bin/qap
+SELF="$0"
+while [ -h "$SELF" ]; do
+  LINK=$(readlink "$SELF")
+  case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+REPO="$(cd "$(dirname "$SELF")/.." && pwd)"
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+  PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m qap "$@"
+fi
+exec uv run --quiet --project "$REPO" qap "$@"

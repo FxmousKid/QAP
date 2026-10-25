@@ -1,0 +1,14 @@
+[project]
+name = "qap"
+version = "0.1.0"
+description = "QA-pass tooling: place, carry, build and browse QA passes (CLI + local dashboard)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+qap = "qap.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9,<0.10"]
+build-backend = "uv_build"
