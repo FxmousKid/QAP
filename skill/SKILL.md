@@ -8,7 +8,7 @@ description: "Write a QA pass: a self-contained HTML conversation log that quote
 A QA pass is one HTML page per round of a design or decision conversation. It quotes the user, answers them
 **point by point**, keeps each subject's earlier back-and-forth folded in its own thread, and ends with the
 decisions the user must take, each with a default. The reference layout is RBAC
-`Coach/RBAC/choices/QA-PASS-1.html` … `QA-PASS-19.html` (later RBAC passes drifted into question cards only:
+`authz/rbac/QA-PASS-1.html` … `QA-PASS-19.html` in the content root (later RBAC passes drifted into question cards only:
 don't copy those).
 
 The page comes with this behaviour built in; you never write it by hand:
@@ -32,6 +32,11 @@ The page comes with this behaviour built in; you never write it by hand:
 - **Deep links.** `QA-PASS-N.html#p3-1a` opens the fold that holds message `p3-1a` and flashes it. A link in
   the text to any `#id` (a subject, a need item, a decision box, a folded message) does the same, and the
   browser's Back returns to the sentence the reader clicked.
+- **Back to where I clicked.** After a jump through a link in the text (or a row of View ★s), a faint
+  "↩ Back to subject NN" button shows on the top row, at the article's left edge (under Contents on narrow
+  windows). It returns to the link, reopening its folds, and flashes it. Jumps stack ("+2"); it fades 20 s
+  after the last jump (hovering keeps it) and hides once nothing is left to return to. The browser's Back
+  does the same thing; the key is `b`.
 - **Responsive to the screen.** The page detects the pixel ratio, the window width tier (`xs`…`xxl`) and
   ultrawide screens, sets them on `<html>` (`data-dpr`, `data-size`, `data-ultrawide`), and re-detects on
   resize, zoom or a move to another screen.
@@ -69,27 +74,49 @@ unavailable, failing, unauthenticated or timing out, tell the user, every time:*
   plain words, numbered decisions with options and a recommended default. Wait for the answers. "Go ahead" is
   not approval of a plan the user has not seen.
 
-## Files
+## Files: where a pass goes (ask `qap`, never guess)
+
+Every QA pass lives in one content tree, browsed in a dashboard (`qap serve`):
 
 ```
-<project>/choices/
-  QA-PASS-N.src.html   ← you edit this (from template/QA-PASS.src.html, or carry.py for the next pass)
-  img/                 ← PNG/SVG/JPG for every pass (charts, screenshots); folds keep referencing old images
-  QA-PASS-N.html       ← built, self-contained, the file you hand over
+~/Desktop/Dev/ai/QAP/qa-pass-content/      (qap config content_root; QAP_CONTENT_ROOT wins)
+  <folder>/ …                              folders nest; folder.json {title, icon, order}
+    <subject>/                             subject.json {title, icon, qa_project, sources, created}
+      QA-PASS-N.src.html                   ← you edit this (qap carry writes it)
+      img/                                 ← PNG/SVG/JPG for every pass (+ the scripts that drew them)
+      QA-PASS-N.html                       ← built, self-contained, the file you hand over
 ```
 
-Name passes `QA-PASS-1`, `QA-PASS-2`, … per project. Put `choices/` in the project's dossier (for example
-`Coach/brain/<ticket>/choices/` or `Coach/RBAC/choices/`), not in a code repo, unless asked.
+`qap` (repo `~/Desktop/Dev/ai/QAP/qa-pass`, run `~/Desktop/Dev/ai/QAP/qa-pass/bin/qap …`, or
+`uv run --project ~/Desktop/Dev/ai/QAP/qa-pass qap …`) places and builds passes. Agents: always pass every
+argument and `--json`; it never prompts then. A subject is named by its path (`db-migration-v3/interaction`)
+or, when unique, its folder name, title or qa-project.
 
-**Build and check:**
 ```bash
-S=~/.claude/skills/qa-pass/scripts
-python3 $S/carry.py QA-PASS-1.src.html QA-PASS-2.src.html --pass 2 --skip p7,p8   # next pass only
-#   add --stars stars.txt (the user's pasted "Copy list") to seed their stars into the new pass
-python3 $S/build.py QA-PASS-N.src.html QA-PASS-N.html   # inlines CSS, JS, images, AI labels; links "subject NN"
-                                                        #   and "need item N"; refuses on leftovers
-python3 $S/check.py QA-PASS-N.html                      # structure, labels, ids, links, titles, figures
+Q=~/Desktop/Dev/ai/QAP/qa-pass/bin/qap
+$Q list --json                         # folders, subjects, pass counts: find the subject first
+$Q where interaction --json            # its folder, qa-project, latest pass, next pass number and file names
+$Q new-subject db-migration-v3/billing --title "Billing (PRD-120)" --icon 💳 --qa-project v3-billing --json
+                                       # a new subject: ask the user which folder if no folder fits
+$Q carry interaction [--skip p7,p8] [--stars stars.txt] --json
+                                       # starts the next pass: carry.py from the latest source, or the
+                                       # template (qa-project and number filled in) for pass 1
+$Q build interaction --check           # build.py on the latest source (--pass N for another), then check.py
+$Q build interaction --all             # rebuild every page that has a source; keeps a page whose rebuild
+                                       # fails check (old-format sources)
+$Q place ~/somewhere/choices db-migration-v3/billing --create --title "Billing" --json
+                                       # move passes made elsewhere in; leaves a symlink at the old place
+$Q mkdir / mv / rename / icon / rmdir  # organise (the dashboard does the same: drag a tile onto a folder)
+$Q serve --open                        # the dashboard: http://127.0.0.1:8750 (one origin: stars persist)
 ```
+
+- One subject = one conversation thread (one qa-project), passes `QA-PASS-1`, `QA-PASS-2`, … in it. A
+  new topic is a new subject; ask the user which folder it goes in when it is not obvious (`qap list`).
+- Never write a pass outside the content root, and never into a code repo, unless the user asks. An old
+  `<project>/choices/` path is a symlink into the content root now: it still works, but `qap where` gives
+  the real path.
+- The scripts stay usable directly (`~/.claude/skills/qa-pass/scripts/{carry,build,check}.py`); `qap`
+  only picks the files for them.
 
 ## Page structure (in this order)
 
@@ -129,15 +156,16 @@ python3 $S/check.py QA-PASS-N.html                      # structure, labels, ids
    with its default, plus one **answer line** (`ok` takes every default; otherwise for example
    `A1 · B go · C wait`).
 6. A `.call.violet` **"What I will not do until you answer"**: no code, no prod write, no tickets, …
-7. **Footer.** "Stored at `<path>`. This is the conversation log for pass N, not the spec. Open it in a
-   browser."
+7. **Footer.** "Stored at `<path>` (the real path `qap where` gives). This is the conversation log for
+   pass N, not the spec. Open it in a browser (or `qap serve`)."
 
 The side table of contents builds itself from every `main h2[id]` and copies its chips. Every section needs
 an `id`.
 
 **Next pass on the same project:**
-- Run `carry.py` (above). It moves each subject's open messages, byte for byte, into its fold, and adds
-  `{{TODO:…}}` placeholders for the new round (the build refuses until they are filled or deleted).
+- Run `qap carry <subject>` (above; it runs `carry.py`). It moves each subject's open messages, byte for
+  byte, into its fold, and adds `{{TODO:…}}` placeholders for the new round (the build refuses until they
+  are filled or deleted).
 - `--skip` the subjects the user did not answer: they keep their last round open.
 - Keep the same subjects and ids. Settled subjects get an `ok` chip. New subjects go at the end, before the
   closing sections; renumber "What I need from you" to stay last (its id stays `need`).
@@ -220,8 +248,8 @@ A QA pass is read by someone deciding. A good chart decides faster than three pa
   the figure that puts this item among its siblings, with current numbers, in an open answer (not only in a
   fold). For the v3 families: how many function bodies, keys, RPCs, GraphQL operations and clients each move
   touched. Copy the last sibling's script, add this item, redraw. Examples:
-  `Coach/v3-refonte/choices/img/org-vs-system.py`, `signal/choices/img/family-size.py`,
-  `session/choices/img/family-size.py`.
+  `db-migration-v3/system-org/img/org-vs-system.py`, `db-migration-v3/signal/img/family-size.py`,
+  `db-migration-v3/session/img/family-size.py` (in the content root).
 
 **How to draw them**
 - Use `scripts/chart_style.py` (matplotlib) with `uv run --no-project --with matplotlib python chart.py`.
@@ -249,22 +277,23 @@ A QA pass is read by someone deciding. A good chart decides faster than three pa
 
 ## Before you hand it over
 
-1. `build.py`, then `check.py`, with no PROBLEM line. Read every warning; fix every title, chip and
+1. `qap build <subject> --check` (build.py, then check.py), with no PROBLEM line. Read every warning; fix every title, chip and
    reference warning in the open sections (earlier folds stay as written).
 2. **Render check.**
-   - The Playwright MCP blocks `file:` URLs, so serve the folder:
-     `python3 -m http.server 8765 --bind 127.0.0.1` (in the background).
-   - Open `http://127.0.0.1:8765/QA-PASS-N.html` and take screenshots of the top, one subject and the
-     decisions.
+   - The Playwright MCP blocks `file:` URLs, so serve the content: `qap serve --port 8765 --json` (in the
+     background; it prints the URL). Open a NEW tab on
+     `http://127.0.0.1:8765/#/<subject>?pass=N` (the dashboard) or `http://127.0.0.1:8765/c/<subject>/QA-PASS-N.html`
+     (the page alone), and take screenshots of the top, one subject and the decisions.
    - Check both themes (click `#theme-toggle`); that the article does not move when `#toc-toggle` opens or
      closes the pane (compare `main.getBoundingClientRect().left`); star two messages, one in a fold, open
      `#stars-open`, and click a row: the fold opens and the message flashes. Then unstar those two. Click one
-     "subject NN" link and one link into a fold.
+     "subject NN" link and one link into a fold; the "↩ Back to …" button appears top left and returns
+     to the link.
    - **Never clear `localStorage` in a render check.** The Playwright browser can be the user's own profile:
      its storage holds their stars and theme. Undo only what the check itself set.
    - Browsers cache the page: add `?v=N` to the URL after each rebuild.
    - Check one wide viewport (for example 3440×1300) and one narrow one (760 px).
-   - Stop the server afterwards.
+   - Stop the server afterwards and close the tab.
    - If Playwright is not connected, say so (see the rule at the top) and check the HTML by reading it.
 3. **In the chat:**
    - the path;
