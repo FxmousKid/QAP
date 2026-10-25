@@ -1,151 +1,49 @@
-# qa-pass (QAP)
+# QAP
 
-Tooling for QA passes: the HTML conversation logs written with the `qa-pass` skill (one page per round of
-a design conversation, every message quoted, every decision in a box with a default).
+Tooling for **QA passes**: the pages an AI agent writes, one per round of a design conversation, for a human to read
+and answer.
 
-This repo holds three things:
+![The dashboard: folders and subjects as coloured icon tiles](docs/img/dashboard.png)
 
-| Part | Where | What it does |
-|---|---|---|
-| The skill | `skill/` (`~/.claude/skills/qa-pass` is a symlink to it) | `SKILL.md`, the page template, `build.py` / `check.py` / `carry.py`, the page's own JS and CSS |
-| `qap`, the CLI | `src/qap/` | Where a pass goes, the next pass number, carry / build / check, folders and moves |
-| The dashboard | `src/qap/web/` + `qap serve` | Icon tiles for folders and subjects, a pass viewer with a selector made for 40+ passes |
+## A QA pass
 
-The passes themselves are not here. They live in the content root, by default
-`~/Desktop/Dev/ai/QAP/contents` (its own folder, not in git).
+One self-contained HTML page that quotes you point by point, answers each point in its own thread (earlier rounds
+folded), and ends with numbered decisions, each with a default.
 
-## Run it
+<p>
+  <img src="docs/img/pass.png" width="49%" alt="A pass page: a subject's thread, its earlier round unfolded, and two decision boxes with their defaults">
+  <img src="docs/img/stars-dark.png" width="49%" alt="The same page in dark mode with the View stars dialog listing four starred messages">
+</p>
 
-Nothing to install: the CLI is Python standard library only.
+Light and dark themes, a contents pane, stars that carry over to the next pass, links that open the folds they point
+into, and a button back to where you clicked. CSS, JS and images are inlined: the page opens offline.
+
+## `qap`, the CLI
 
 ```bash
-~/Desktop/Dev/ai/QAP/QAP/bin/qap list           # python3 >= 3.10, else falls back to uv run
-uv run --project ~/Desktop/Dev/ai/QAP/QAP qap list
-uv tool install ~/Desktop/Dev/ai/QAP/QAP         # optional: a `qap` on your PATH
+qap new-subject payments/retries --title "Payment retries" --icon chart --qa-project retries
+qap carry retries              # start the next pass: fold the last round, add the new round's placeholders
+qap build retries --check      # build the page (links, labels, inlined images), then lint it
+qap list                       # folders, subjects and their passes
+qap serve --open               # the dashboard
 ```
 
-Then `qap serve --open` and browse every pass at <http://127.0.0.1:8750>.
-
-## The content layout
-
-```
-contents/
-  <folder>/                    any depth; a folder holds folders and subjects
-    folder.json                optional {title, icon, color, order}
-    <subject>/                 one conversation thread
-      subject.json             {title, icon, color, qa_project, sources, created}
-      QA-PASS-1.src.html       the source of pass 1 (you or carry.py edit it)
-      QA-PASS-1.html           the built page, self-contained (what the reader opens)
-      img/                     the images of every pass, and the scripts that drew them
-```
-
-- A directory is a **subject** when it holds `subject.json` (or, without one, `QA-PASS-*` files). Every
-  other directory is a **folder**.
-- `qa_project` is the pages' `<meta name="qa-project">`. The pages keep their stars in the browser under
-  that key, so every pass of a subject shares its stars.
-- `sources` lists the places the passes came from. Those places are symlinks into the subject now, so old
-  links keep working. `qap mv` re-points those symlinks when a subject moves.
-- `icon` is an emoji or a built-in name (`qap icon --help`, or the picker in the dashboard). `color`
-  (`#RRGGBB`) is optional. Without it, a tile takes a colour from its folder name.
-- `order` in `folder.json` is either a number (this folder's rank among its siblings) or a list of child
-  names (the order of its children). Anything else is listed folders first, then by title.
-
-Where the content root is, first match wins: `--root`, the `QAP_CONTENT_ROOT` environment variable,
-`~/.config/qap/config.json` (`qap config content_root <path>`), the default above.
-
-## `qap` commands
-
-Run a command without its arguments in a terminal and `qap` asks for them (folders and subjects come from
-a numbered menu). Agents give every argument and add `--json` (no prompt, machine output, `{"ok": false,
-"error": …}` and exit 1 on failure). `--yes` skips confirmations. A subject is named by its path, or by
-its folder name, title or qa-project when that is unique.
-
-| Command | Does |
-|---|---|
-| `qap config [key [value]] [--unset]` | Shows where the content and the skill are, or sets `content_root` / `skill_dir` |
-| `qap list [path] [--passes]` | Shows the tree (`--passes`: every pass with its title) |
-| `qap where <subject>` | Shows the subject's folder, qa-project, latest pass, next pass number and file names |
-| `qap next <subject>` | Shows the next pass number, its `.src.html` / `.html` paths, and the source it carries from |
-| `qap new-subject <folder>/<subject> --title --icon --qa-project` | Creates a subject with its `subject.json` and `img/` |
-| `qap carry <subject> [--skip p7,p8] [--stars file] [--ai v\|Name\|Model]` | Starts the next pass: `carry.py` from the latest source, or the template for pass 1 |
-| `qap build <subject> [--pass N \| --all] [--check]` | Runs `build.py`. `--all` rebuilds every page that has a source and keeps the old page when the new one fails `check.py` |
-| `qap check <subject> [--pass N \| --all]` | Runs `check.py` |
-| `qap mkdir <path> --title --icon` | Creates a folder |
-| `qap mv <src> <dest>` | Moves a subject or folder into a folder (`/` is the top level), or to a new path (move and rename) |
-| `qap rename <path> <title>` / `qap icon <path> <icon> [--color]` | Changes what the tile shows |
-| `qap rmdir <path>` | Removes an empty folder. `qap` never deletes a pass |
-| `qap place <file\|dir> <subject> [--as N] [--create] [--no-link]` | Moves a pass, or a whole old `choices/` folder, into a subject and leaves a symlink behind |
-| `qap serve [--port N] [--open]` | Starts the dashboard on 127.0.0.1 |
-
-Example, for an agent:
-
-```console
-$ qap next rbac --json
-{
-  "ok": true,
-  "subject": "authz/rbac",
-  "n": 43,
-  "src": "/Users/iyan/Desktop/Dev/ai/QAP/contents/authz/rbac/QA-PASS-43.src.html",
-  "html": "/Users/iyan/Desktop/Dev/ai/QAP/contents/authz/rbac/QA-PASS-43.html",
-  "img": "/Users/iyan/Desktop/Dev/ai/QAP/contents/authz/rbac/img",
-  "carry_from": null
-}
-```
+Agents add `--json`: no prompts, JSON out. `skill/` is the `qa-pass` agent skill that tells an agent how to write a
+pass and when to call `qap`.
 
 ## The dashboard
 
-`qap serve` serves the dashboard and the content from **one origin** (`http://127.0.0.1:8750`, or the
-next free port). This matters because the pages keep their stars and theme in `localStorage`, and the
-browser keeps `localStorage` per origin. Served this way, a star made in pass 3 shows in pass 2.
+`qap serve` serves the dashboard and every pass from one local origin, so stars and the theme follow you from pass to
+pass. Open a subject and its latest pass shows, with a pass selector made for 40+ passes.
 
-- **Folders and subjects are tiles.** Each tile is a rounded square in the item's colour, with its icon
-  inside and its name under the icon, like the map in `~/.dotfiles/README.md`. Folder tiles have a tab.
-  Subject tiles carry their pass count.
-- **Click a subject** and its latest pass opens in a large frame. The bar holds the pass selector:
-  - `‹` and `›` step through the passes;
-  - a strip shows every pass number;
-  - "Pass N ▾" opens a list you can search by number, title or date;
-  - `↗` opens the page alone.
-- **Keys:** `←` and `→` (or `[` and `]`, which also work inside the page) go to the previous and next
-  pass. `Home` and `End` go to the first and latest. `/` opens the search.
-- **Organise:**
-  - "+ New folder" asks for a title, an icon and a colour;
-  - drag a tile onto a folder tile, or onto a name in the breadcrumb to move it up (Undo in the toast);
-  - each tile's `⋯` menu (or a right-click) has Rename, Icon and colour, Move to…, and Delete for an
-    empty folder.
-- The theme is the same as the pages' (`qa-theme`), so one toggle switches both. The dashboard also works
-  at phone width.
+![The viewer: a subject's latest pass with the searchable list of its passes open](docs/img/viewer.png)
 
-The server is Python's `http.server`, bound to 127.0.0.1 only. It has a small JSON API (`GET /api/tree`,
-`POST /api/mkdir|mv|rename|icon|rmdir`) that calls the same functions as the CLI (`qap.layout`). It
-refuses writes that do not come from its own origin (it checks the Host and Origin headers, and requires a
-JSON body).
+## Run it
 
-## How the skill uses it
-
-`skill/SKILL.md` § "Files: where a pass goes" tells an agent to:
-
-1. Find the subject with `qap list --json`, or create it with `qap new-subject` (asking the user for the
-   folder when none fits).
-2. Start the round with `qap carry <subject>`.
-3. Write the source, then run `qap build <subject> --check`.
-4. Do the render check through `qap serve`.
-
-The skill's scripts stay the only implementation. `qap` only picks the files and runs them.
-
-## Code map
-
-```
-bin/qap                 shim: python3 -m qap with src/ on the path (uv run fallback)
-src/qap/config.py       content root and skill dir resolution, ~/.config/qap/config.json
-src/qap/passes.py       pass file names, titles, next pass number
-src/qap/layout.py       the tree, resolve, and every write (mkdir, new subject, move + relink, place, rmdir)
-src/qap/skill.py        build/check/carry wrappers, template seeding, safe rebuild
-src/qap/cli.py          argparse commands, prompts (prompt.py), --json output
-src/qap/server.py       http.server: static dashboard, /c/ content, JSON API
-src/qap/web/            index.html, style.css, app.js (router), tiles.js, viewer.js, dialogs.js, icons.js, api.js
-skill/assets/           qa-pass.js / qa-pass.css, inlined into every built page
-tests/                  unittest: layout functions, CLI --json, the server
+```bash
+uv run qap --help                      # or bin/qap: Python 3.10+, standard library only
+python3 examples/make_demo.py /tmp/qap-demo && bin/qap serve --root /tmp/qap-demo --open
 ```
 
-Run the tests with `uv run --project . python -m unittest discover -s tests`.
+Passes live outside this repo, in a content root (`--root`, `QAP_CONTENT_ROOT` or `qap config content_root <path>`).
+Everything else: [docs/reference.md](docs/reference.md).
