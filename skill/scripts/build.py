@@ -14,6 +14,12 @@ Placeholders in the source:
 References become links (only when the target exists in the page; idempotent, so a built page builds the same):
   "subject 05", "subject 05's", "subjects 09 and 20", "subjects 04–14"  -> <a href="#p5">…</a> per number
   each <li> of the first <ol> of the #need section gets id="need-N"; "need item 12", "need items 9 and 12" -> #need-N
+  A need item named in a message of an earlier pass (a fold, or a skipped subject's open round) is an item of
+  that pass's list, not this one's, so it links to the sibling page: QA-PASS-K.html#need-N.
+    an AI message of pass K (data-pass="K", or an id ending -Ka)       -> pass K's page
+    a user message of pass K (the reply to pass K-1, often quoting it)  -> pass K-1's page
+  The sibling is the built QA-PASS-K.html next to the source; the link is made only when it has that item.
+  This pass is <meta name="qa-pass">, else the number in the source's file name.
   Never inside <a>, <code>, <pre>, <script>, <style>, <title>, <summary>, <button>, chips, AI labels, tags or
   {{…}} placeholders.
 
@@ -139,39 +145,93 @@ def number_need_items(html: str) -> str:
     return html
 
 
-def link_references(html: str) -> tuple[str, Counter, list[str]]:
+PASS_META = re.compile(r"<meta\s+name=\"qa-pass\"\s+content=\"(\d+)\"", re.I)
+PASS_NAME = re.compile(r"^QA-PASS-(\d+)\b")
+MSG_ID_PASS = re.compile(r"-(\d+)[ua]$")
+
+
+def this_pass(html: str, src: pathlib.Path | None) -> int | None:
+    """The number of the pass being built: <meta name="qa-pass">, else the source's file name."""
+    m = PASS_META.search(html) or (PASS_NAME.match(src.name) if src else None)
+    return int(m.group(1)) if m else None
+
+
+def message_page(attrs: str) -> int | None | bool:
+    """For a <div>'s attributes: the pass whose need list a .msg's "need item N" means, None when the message
+    has no pass, False for a div that is not a message. An AI message of pass K writes about pass K's list; a
+    user message of pass K answers (and quotes) the page of pass K-1."""
+    cls = re.search(r"\bclass=\"([^\"]*)\"", attrs)
+    classes = cls.group(1).split() if cls else []
+    if "msg" not in classes:
+        return False
+    found = re.search(r"\bdata-pass=\"(\d+)\"", attrs)
+    if not found:
+        own = re.search(r"\bid=\"([^\"]*)\"", attrs)
+        found = MSG_ID_PASS.search(own.group(1)) if own else None
+    if not found:
+        return None
+    return int(found.group(1)) - (1 if "user" in classes else 0)
+
+
+def link_references(html: str, src: pathlib.Path | None = None) -> tuple[str, Counter, list[str]]:
+    """Link "subject NN" and "need item N" (see the module docstring). src: the source file, whose folder holds
+    the earlier passes' pages that a need item of an earlier message links to."""
     ids = set(re.findall(r"\bid=\"([^\"]+)\"", html))
     need = {n: own for n, own, _ in need_items(html) if own}
+    current = this_pass(html, src)
+    sibling_need: dict[int, dict[int, str]] = {}  # pass -> its page's need ids, read once
     made: Counter = Counter()
     unresolved: list[str] = []
 
-    def target(word: str, number: str) -> str | None:
+    def elsewhere(page: int | None) -> bool:
+        return page is not None and current is not None and page != current
+
+    def need_of(page: int | None) -> tuple[str, dict[int, str]]:
+        """(href prefix, {item number: id}) of the need list a reference on `page` means: this page's, or the
+        built sibling page's ({} when it is missing, or for the chat before pass 1, which has no page)."""
+        if not elsewhere(page):
+            return "", need
+        name = f"QA-PASS-{page}.html"
+        if page not in sibling_need:
+            path = src.parent / name if src and page >= 1 else None
+            items = need_items(path.read_text(encoding="utf-8")) if path and path.is_file() else []
+            sibling_need[page] = {n: own for n, own, _ in items if own}
+        return name, sibling_need[page]
+
+    def target(word: str, number: str, page: int | None) -> str | None:
         if word.lower().startswith("need"):
-            return need.get(int(number))
+            prefix, items = need_of(page)
+            own = items.get(int(number))
+            return f"{prefix}#{own}" if own else None
         for candidate in (f"p{int(number)}", f"p{number}"):
             if candidate in ids:
-                return candidate
+                return f"#{candidate}"
         return None
 
-    def link_text(text: str) -> str:
+    def link_text(text: str, page: int | None) -> str:
         def one(m: re.Match[str]) -> str:
             word = m.group("word")
             kind = "need item" if word.lower().startswith("need") else "subject"
-            first = target(word, m.group("first"))
+            where = ""
+            if kind == "need item" and elsewhere(page):
+                where = f" (QA-PASS-{page}.html)" if page >= 1 else " (the chat before pass 1)"
+            first = target(word, m.group("first"), page)
             if first:
                 made[kind] += 1
-                piece = f'<a href="#{first}">{word}{m.group("gap")}{m.group("first")}</a>'
+                made["earlier page"] += bool(where)
+                piece = f'<a href="{first}">{word}{m.group("gap")}{m.group("first")}</a>'
             else:
-                unresolved.append(f"{word} {m.group('first')}")
+                unresolved.append(f"{word} {m.group('first')}{where}")
                 piece = f"{word}{m.group('gap')}{m.group('first')}"
 
             def more(r: re.Match[str]) -> str:
-                t = target(word, r.group(2))
+                t = target(word, r.group(2), page)
                 if not t:
-                    unresolved.append(f"{word} {r.group(2)}")
+                    unresolved.append(f"{word} {r.group(2)}{where}")
                     return r.group(0)
                 made[kind] += 1
-                return f'{r.group(1)}<a href="#{t}">{r.group(2)}</a>'
+                made["earlier page"] += bool(where)
+                return f'{r.group(1)}<a href="{t}">{r.group(2)}</a>'
 
             if not word.lower().endswith("s"):  # "subject 05, 3 tables": a list needs the plural
                 return piece + m.group("rest")
@@ -181,16 +241,25 @@ def link_references(html: str) -> tuple[str, Counter, list[str]]:
 
     out: list[str] = []
     stack: list[tuple[str, bool]] = []  # open SKIP elements and spans (a chip span skips)
+    divs: list[int | None | bool] = []  # open divs: message_page() of each (False: not a message)
     pos = 0
     for m in TOKENS.finditer(html):
         text = html[pos:m.start()]
-        out.append(link_text(text) if not any(skip for _, skip in stack) else text)
+        page = next((p for p in reversed(divs) if p is not False), None)  # the innermost message's page
+        out.append(link_text(text, page) if not any(skip for _, skip in stack) else text)
         out.append(m.group(0))
         pos = m.end()
         tag = TAG.match(m.group(0))
         if not tag or m.group(0).startswith("<!--"):
             continue
         closing, name, attrs = tag.group(1), tag.group(2).lower(), tag.group(3)
+        if name == "div":
+            if closing:
+                if divs:
+                    divs.pop()
+            elif not attrs.rstrip().endswith("/"):
+                divs.append(message_page(attrs))
+            continue
         if name not in SKIP and name != "span":
             continue
         if attrs.rstrip().endswith("/"):
@@ -205,7 +274,8 @@ def link_references(html: str) -> tuple[str, Counter, list[str]]:
             label = name == "span" and cls is not None and {"chip", "ai-label"} & set(cls.group(1).split())
             stack.append((name, name in SKIP or bool(label)))
     rest = html[pos:]
-    out.append(link_text(rest) if not any(skip for _, skip in stack) else rest)
+    page = next((p for p in reversed(divs) if p is not False), None)
+    out.append(link_text(rest, page) if not any(skip for _, skip in stack) else rest)
     return "".join(out), made, unresolved
 
 
@@ -219,7 +289,7 @@ def build(src: pathlib.Path, out: pathlib.Path) -> int:
     html = re.sub(r"\{\{AI:([^|}]+)\|([^|}]+)\|([^}]+)\}\}", lambda m: ai_label(*m.groups()), html)
     # After the labels and buttons are expanded, so a built page builds the same; before the images.
     html = number_need_items(html)
-    html, made, unresolved = link_references(html)
+    html, made, unresolved = link_references(html, src)
 
     missing: list[str] = []
 
@@ -239,9 +309,10 @@ def build(src: pathlib.Path, out: pathlib.Path) -> int:
         raise SystemExit(f"build: refused, placeholders left: {sorted(set(left))}")
     out.write_text(html, encoding="utf-8")
     print(f"{out} {len(html) // 1024} KB, {html.count('data:image')} images inlined, "
-          f"{made['subject']} subject and {made['need item']} need-item references linked")
+          f"{made['subject']} subject and {made['need item']} need-item references linked"
+          + (f" ({made['earlier page']} to an earlier pass's page)" if made["earlier page"] else ""))
     if unresolved:
-        print(f"  not linked (no such id in this page): {sorted(set(unresolved))}")
+        print(f"  not linked (no such id in this page, or in the earlier page named): {sorted(set(unresolved))}")
     return 0
 
 

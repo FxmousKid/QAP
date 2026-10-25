@@ -217,8 +217,11 @@ Two titles the user could not read, rewritten:
 The page is long. "§ 4" or "subject 14" without a link sends the reader searching 10,000 words.
 - **In the page** (subject NN, need item N, a decision box, an earlier message): a link to its anchor.
   `build.py` links "subject 05", "subjects 09 and 20", "subjects 04–14" and "need item 12" for you, when the
-  target exists (never inside `code`, `pre`, links or chips). Link anything else yourself: give a decision box
-  an `id` and write `<a href="#dec-d">decision D, the Langfuse ids</a>`; a link into a closed fold opens it.
+  target exists (never inside `code`, `pre`, links or chips). In a message of an earlier pass (a fold, a
+  skipped subject's open round), "need item N" means that pass's list, so it links to `QA-PASS-K.html#need-N`:
+  pass K for the AI's message of pass K, pass K-1 for the user's (their reply to, and quotes of, pass K-1).
+  Link anything else yourself: give a decision box an `id` and write
+  `<a href="#dec-d">decision D, the Langfuse ids</a>`; a link into a closed fold opens it.
 - **In a repo doc or code:** link the exact place, and name the section in words: "name map § 4,
   'Constraints, indexes, triggers and policies'", not "name map, § 4".
   - A GitHub blob URL pinned at a commit SHA, never a branch (lines move):
