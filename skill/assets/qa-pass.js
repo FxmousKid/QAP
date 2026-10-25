@@ -18,6 +18,7 @@
     store("qa-theme", theme);
     var button = document.getElementById("theme-toggle");
     if (button) button.textContent = theme === "dark" ? "☀ Light" : "☾ Dark";
+    placeBack();  // the toggle's width changes with its label
   }
 
   // ---- contents pane (fixed; the article reserves its gutter, so opening it moves nothing) ----
@@ -54,6 +55,7 @@
     }
     var stars = document.getElementById("stars-open");
     if (stars) root.style.setProperty("--stars-w", stars.offsetWidth + "px");
+    placeBack();  // the top row's buttons moved (window width, star count): the back button's room follows
   }
 
   function watchPixelRatio() {
@@ -272,7 +274,7 @@
   // ---- "back to where I clicked" ----
   // A jump through an in-page link (or a row of the stars dialog) records where the reader was: the link
   // itself and its height on the screen. A small, faint button then shows near the top left of the article
-  // (the same row as Contents and View ★s; under Contents on narrow windows). It returns to the link,
+  // (the same row as Contents and View ★s; next to Contents on narrow windows). It returns to the link,
   // opening the folds around it if they were closed, and flashes it. Jumps stack: after one return the
   // button offers the previous origin, until none is left. It fades out by itself 20 s after the last jump
   // (hovering it keeps it), and comes back with the next jump. Each jump is a history entry, so the
@@ -298,11 +300,27 @@
   }
 
   function placeBack() {
-    // Aligned with the article's text (its left edge plus its padding), never the window's edge.
+    // Wide windows: aligned with the article's text (its left edge plus its padding), never the window's edge.
+    // Narrow windows: docked in the top row, in the room between Contents and the theme toggle, so it never
+    // covers the header or the line a jump lands on (60 px down). With little room it keeps only its arrow
+    // ("+N" becomes a corner badge); with none (the smallest phones) it moves to the bottom left corner.
     var main = document.querySelector("main");
     if (!main) return;
+    var b = document.getElementById("back-to-link");
+    var room = 0;
     var left = main.getBoundingClientRect().left + (parseFloat(getComputedStyle(main).paddingLeft) || 0);
+    if (narrow()) {
+      var toc = document.getElementById("toc-toggle");
+      var theme = document.getElementById("theme-toggle");
+      left = toc ? toc.getBoundingClientRect().right + 8 : 16;
+      room = Math.floor((theme ? theme.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
+      root.style.setProperty("--back-room", Math.max(0, room) + "px");
+    }
     root.style.setProperty("--back-left", Math.round(left) + "px");
+    if (b) {
+      b.classList.toggle("compact", narrow() && room < 96);
+      b.classList.toggle("low", narrow() && room < 30);
+    }
   }
 
   function whereIs(el) {
@@ -505,7 +523,6 @@
       if (e.key === "\\") setToc(!root.classList.contains("toc-open"), true);
       if (e.key === "b" && origins.length && !(document.getElementById("stars-dialog") || {}).open) goBack();
     });
-    window.addEventListener("resize", placeBack, { passive: true });
     // The theme picked in another pass or in the dashboard around this page (same origin) applies here too.
     window.addEventListener("storage", function (e) {
       if (e.key === "qa-theme" && (e.newValue === "dark" || e.newValue === "light") && e.newValue !== root.dataset.theme) setTheme(e.newValue);

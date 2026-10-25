@@ -33,10 +33,10 @@ The page comes with this behaviour built in; you never write it by hand:
   the text to any `#id` (a subject, a need item, a decision box, a folded message) does the same, and the
   browser's Back returns to the sentence the reader clicked.
 - **Back to where I clicked.** After a jump through a link in the text (or a row of View ★s), a faint
-  "↩ Back to subject NN" button shows on the top row, at the article's left edge (under Contents on narrow
-  windows). It returns to the link, reopening its folds, and flashes it. Jumps stack ("+2"); it fades 20 s
-  after the last jump (hovering keeps it) and hides once nothing is left to return to. The browser's Back
-  does the same thing; the key is `b`.
+  "↩ Back to subject NN" button shows on the top row, at the article's left edge (next to Contents on narrow
+  windows, so it never covers the header or the line a jump lands on). It returns to the link, reopening its
+  folds, and flashes it. Jumps stack ("+2"); it fades 20 s after the last jump (hovering keeps it) and hides
+  once nothing is left to return to. The browser's Back does the same thing; the key is `b`.
 - **Responsive to the screen.** The page detects the pixel ratio, the window width tier (`xs`…`xxl`) and
   ultrawide screens, sets them on `<html>` (`data-dpr`, `data-size`, `data-ultrawide`), and re-detects on
   resize, zoom or a move to another screen.

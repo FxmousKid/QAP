@@ -132,7 +132,9 @@ footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--rule);font-si
 
 /* ===== "back to where I clicked": faint until hovered, on the top row at the article's left edge =====
    qa-pass.js sets --back-left to the article's text edge (so it never sits at the window's edge), shows it
-   after an in-page jump, and fades it out 20 s later. Narrow windows: under the Contents button. */
+   after an in-page jump, and fades it out 20 s later. Narrow windows: docked in the top row next to the
+   Contents button, in the room before the theme toggle (--back-room), so it never covers the header or the
+   line a jump lands on; .compact keeps only the arrow, .low (no room at all) moves it to the bottom left. */
 #back-to-link{position:fixed;top:14px;left:var(--back-left,var(--edge));z-index:31;display:flex;align-items:center;gap:6px;
   max-width:min(46ch,calc(100vw - 32px));border:1px solid var(--rule2);border-radius:999px;padding:6px 12px 6px 10px;
   background:color-mix(in oklab,var(--surface) 82%,transparent);color:var(--ink2);font:600 .75rem/1 var(--mono);
@@ -148,7 +150,12 @@ footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--rule);font-si
 #back-to-link .bk-more{color:var(--ink3);font-weight:500}
 @keyframes back-in{from{opacity:0;transform:translateY(-4px)}}
 a.flash{border-radius:4px}
-@media (max-width:1000px){#back-to-link{top:54px;left:16px}}
+@media (max-width:1000px){#back-to-link{max-width:var(--back-room,calc(100vw - 32px))}}
+#back-to-link.compact{padding:6px 9px}
+#back-to-link.compact .bk-text{display:none}
+#back-to-link.compact .bk-more{position:absolute;top:-6px;right:-8px;padding:2px 4px;border:1px solid var(--rule2);
+  border-radius:999px;background:var(--surface);font-size:.625rem;line-height:1}
+#back-to-link.low{top:auto;bottom:16px;left:16px;max-width:calc(100vw - 32px)}
 @media print{#back-to-link{display:none}}
 
 /* ===== contents pane: fixed, never part of the article's flow =====
