@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="qa-project" content="PROJECT">  <!-- stars are kept per project, so they carry over to the next passes -->
+<meta name="qa-pass" content="N">
+<title>PROJECT — Q&amp;A pass N</title>
+{{QA_PASS_HEAD}}
+</head>
+<body>
+{{TOPBAR}}
+<aside class="side" aria-label="On this page">
+  <div class="side-h">On this page</div>
+  <ol id="toc-list"></ol>  <!-- filled from every <main> h2[id], with its chips -->
+</aside>
+<main class="wrap">
+
+<header>
+  <div class="kicker">PROJECT · conversation, not a spec</div>
+  <h1>Q&amp;A pass N — the two or three topics of this pass</h1>
+  <p class="sub">
+    You answered my points one by one. This file quotes you, answers you, and records what I think we now agree on.
+    Earlier messages of each thread are folded, in their original formatting; your latest words and my answer stay open.
+    Star any message (☆ at its right) and find it again with View ★s.
+  </p>
+  <div class="meta">DD Mon YYYY · pass N · sibling of <code>…</code> · links (PR, ticket, meeting notes)</div>
+</header>
+
+<p class="lede">
+  The one-paragraph answer, in plain words, numbers first. What changed since the last pass and what it means.
+</p>
+
+<div class="mantras">
+  <div><b>Where we are.</b> One line per workstream: what exists, what is green, what is waiting.</div>
+</div>
+
+<!-- ================= one subject = one thread =================
+     h2 states the CONCLUSION, not the topic, in plain words a reader understands without the earlier passes:
+       a decision code (A1, C, D1) only next to its meaning ("dropping the Langfuse ids (D1)"), never "D1 built".
+     Chips: ok (agreed/done), exp (explained), rew (corrected), ask (needs you). Chip text follows the title rule.
+     Every reference is a link: "subject 05" and "need item 3" are linked by build.py; a repo doc or code line gets
+       a GitHub blob URL pinned at a SHA (#L72; Markdown: ?plain=1#L165) and its section's name in words.
+     Every message is a .msg block with a STABLE id: p<subject>-<pass><u|a>  (u = the user, a = the AI).
+       pass 0 = the chat message that started the subject, before pass 1.
+     details.earlier holds every earlier message of THIS subject, oldest first, folded, copied from the earlier pass
+     WITH ITS ORIGINAL FORMATTING (lists, options on their own lines, tables, figures, decision boxes).
+     scripts/carry.py does that move for you when you start the next pass.
+     The user is "Me" (the reader). The AI is the AI label (AI:vendor|Name|Model in double braces): logo + name + model, in the vendor colour. -->
+<h2 id="p1"><span class="n">01</span>The conclusion of this subject, as a sentence anyone can read</h2>
+<span class="chip ask">the question in words: A1 or A2?</span>
+<details class="earlier"><summary>Earlier in this thread</summary>
+  <div class="msg ai" id="p1-0a" data-pass="0"><div class="who">{{AI:claude|Claude|Opus 5.5}}</div>
+    <p><strong>1. The question I asked in the chat.</strong> Its context in one line.</p>
+    <ul class="opts">
+      <li>✅ a) The recommended option.</li>
+      <li>b) The alternative.</li>
+    </ul>
+  </div>
+</details>
+<div class="msg user" id="p1-1u" data-pass="1"><div class="who">Me</div>
+  <p>“The user's reply, verbatim, typos included, line breaks kept.”</p>
+</div>
+<div class="msg ai" id="p1-1a" data-pass="1"><div class="who">{{AI:claude|Claude|Opus 5.5}}</div>
+  <p>My answer: short sentences, numbers first, evidence second. A reference links the exact place:
+    <a href="https://github.com/ORG/REPO/blob/SHA/docs/name-map.md?plain=1#L165">the name map § 4, “Section title”</a>.</p>
+
+  <figure><img src="{{IMG:example-chart.png}}" alt="What the chart shows"><figcaption>One sentence: what to read in the chart, the source and the time window.</figcaption></figure>
+
+  <pre><span class="c">plain-English diagram of a mechanism, when it helps</span>
+step 1   what happens
+step 2   what happens <b>next</b></pre>
+
+  <div class="call violet" id="dec-a"><h4>Decision A: the question, in one line</h4>
+  <p><strong>A1</strong>: the recommended option and its consequence · A2: the alternative and its consequence. <strong>Default: A1.</strong></p></div>
+</div>
+
+<!-- A ticket the user will create by hand (never create it yourself): fill the team's template.
+<div class="ticket"><div class="t-h">Ticket to create · template "…"</div>
+  <p class="t-title">Title</p><div class="t-meta">Team · project · labels · estimate</div>
+  <h4>…template sections…</h4><p>…</p></div> -->
+
+<!-- ================= closing ================= -->
+<h2 id="need"><span class="n">NN</span>What I need from you</h2>
+<ol>  <!-- the build gives each item id="need-N", so "need item 1" anywhere in the page links here -->
+  <li><strong>A</strong> (<a href="#dec-a">decision A</a>). The question, in words: <strong>A1</strong> · A2. Default A1.</li>
+</ol>
+<p>Answer line: <code>ok</code> takes every default (<code>A1</code>). Or reply point by point, quoting what you answer; each reply goes into its own thread in the next pass.</p>
+
+<div class="call violet">
+  <h4>What I will not do until you answer</h4>
+  <p>The concrete list of things that stay untouched (no code, no prod write, no tickets…).</p>
+</div>
+
+<footer>
+  Stored at <code>path/to/QA-PASS-N.html</code>.
+  This is the conversation log for pass N, not the spec.
+  Open it in a browser; do not read it in a terminal.
+  <div class="env" id="env"></div>
+</footer>
+
+</main>
+{{QA_PASS_JS}}
+</body>
+</html>

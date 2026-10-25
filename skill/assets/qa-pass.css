@@ -1,0 +1,242 @@
+/* QA pass page. Font sizes are in rem so one root size (--fs, per width tier below) scales the whole page;
+   no CSS zoom, so the fixed panes and the article share one coordinate system. */
+:root{
+  color-scheme: light;
+  --bg:#fbfaf8; --surface:#ffffff; --surface2:#f5f3ef; --ink:#14130f; --ink2:#4a4740; --ink3:#7d786d;
+  --rule:#e6e2d9; --rule2:#d3cec2;
+  --gold:#B07D00; --s1:#B07D00; --s2:#8B0090; --s3:#D6304F; --s4:#3478F6;
+  --good:#4A7C2F; --warn:#B4700E; --bad:#AF1B3F;
+  --star:#E8A800;
+  /* AI vendor colours: the logo and the name/model label share one colour */
+  --ai-claude:#C15F3C; --ai-openai:#14130f; --ai-gemini:#1A73E8; --ai-other:#3478F6;
+  --user:#8B0090;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#131211; --surface:#1c1b19; --surface2:#232220; --ink:#f5f3ee; --ink2:#c3bfb4; --ink3:#8e897d;
+  --rule:#2c2a27; --rule2:#3c3935;
+  --gold:#D9A21C; --s1:#B8880F; --s2:#A05BC8; --s3:#E66767; --s4:#3987e5;
+  --good:#7FB35C; --warn:#D9A21C; --bad:#E66767;
+  --star:#F5C518;
+  --ai-claude:#D97757; --ai-openai:#f5f3ee; --ai-gemini:#8AB4F8; --ai-other:#3987e5;
+  --user:#B77FD6;
+}
+
+/* ===== responsive tiers =====
+   Width tiers (CSS px of the window) size the root font, the contents pane, the gaps and the wide column
+   (figures, tables, diagrams). Prose and message boxes keep a readable measure. qa-pass.js also sets on
+   <html>: data-dpr (1|2|3, the screen's pixel ratio), data-size (xs…xxl) and data-ultrawide. */
+:root{--fs:16px;--side-w:250px;--gap:48px;--wide-w:860px;--measure:72ch;--pad:28px;
+  /* the pane and the top buttons hug the article on wide screens instead of the window edges */
+  --edge:max(16px, calc((100vw - var(--wide-w)) / 2 - var(--side-w) - var(--gap)))}
+@media (min-width:1500px){:root{--fs:16.5px;--side-w:270px;--gap:56px;--wide-w:1000px}}
+@media (min-width:1900px){:root{--fs:17px;--side-w:290px;--gap:64px;--wide-w:1240px}}
+@media (min-width:2400px){:root{--fs:17.6px;--side-w:310px;--gap:76px;--wide-w:1480px;--measure:76ch}}
+@media (min-width:3000px){:root{--fs:18.2px;--side-w:330px;--gap:88px;--wide-w:1720px;--measure:78ch}}
+html{font-size:var(--fs);scroll-behavior:smooth}
+/* 1x screens (most external monitors, ultrawides): subpixel text is sharper than the Retina-tuned antialiasing */
+:root[data-dpr="1"] body{-webkit-font-smoothing:auto;-moz-osx-font-smoothing:auto}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:1rem/1.62 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+  -webkit-font-smoothing:antialiased}
+
+/* ===== the article never moves =====
+   Its left edge reserves the contents pane's gutter whether the pane is open or not, and centres itself
+   when the window is wide enough. Opening or closing the pane changes nothing in the article. */
+.wrap{display:block;min-width:0;max-width:calc(var(--wide-w) + 2 * var(--pad));
+  margin-left:max(calc(var(--side-w) + var(--gap) - var(--pad)), calc((100vw - var(--wide-w)) / 2 - var(--pad)));
+  margin-right:auto;padding:0 var(--pad) 96px}
+
+header{padding:64px 0 36px;border-bottom:2px solid var(--gold)}
+.kicker{font:600 .75rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:16px}
+h1{font-size:clamp(1.75rem,4.4vw,2.625rem);line-height:1.08;margin:0 0 14px;letter-spacing:-.022em;font-weight:660}
+.sub{font-size:1.125rem;color:var(--ink2);margin:0;max-width:64ch}
+.meta{margin-top:20px;font:400 .8125rem/1.5 var(--mono);color:var(--ink3)}
+h2{font-size:1.5rem;letter-spacing:-.015em;margin:64px 0 8px;font-weight:640;scroll-margin-top:24px}
+h2 .n{font:600 .8125rem/1 var(--mono);color:var(--gold);display:block;margin-bottom:10px;letter-spacing:.1em}
+h3{font-size:1.0625rem;margin:28px 0 8px;font-weight:640;letter-spacing:-.01em}
+p{margin:0 0 14px;max-width:var(--measure)}
+a{color:var(--gold);text-decoration:none;border-bottom:1px solid color-mix(in oklab,var(--gold) 35%,transparent)}
+strong{font-weight:640}
+code{font:.84rem/1.4 var(--mono);background:color-mix(in oklab,var(--gold) 10%,transparent);padding:.12em .38em;border-radius:4px}
+.lede{font-size:1.125rem;border-left:3px solid var(--gold);padding-left:18px;margin:0 0 18px;max-width:68ch}
+.call{border:1px solid var(--rule2);border-left:3px solid var(--gold);border-radius:0 10px 10px 0;padding:16px 20px;margin:20px 0;background:var(--surface);max-width:calc(var(--measure) + 64px)}
+.call.green{border-left-color:var(--good)}
+.call.red{border-left-color:var(--bad)}
+.call.violet{border-left-color:var(--s2)}
+.call h4{margin:0 0 6px;font-size:.9375rem;font-weight:640}
+.call p:last-child{margin-bottom:0}
+.chip{display:inline-block;font:600 .6875rem/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:4px;margin:0 8px 12px 0}
+.chip.ok{background:color-mix(in oklab,var(--good) 16%,transparent);color:var(--good)}
+.chip.rew{background:color-mix(in oklab,var(--warn) 18%,transparent);color:var(--warn)}
+.chip.exp{background:color-mix(in oklab,var(--s4) 16%,transparent);color:var(--s4)}
+.chip.ask{background:color-mix(in oklab,var(--s2) 14%,transparent);color:var(--s2)}
+table{width:100%;border-collapse:collapse;font-size:.906rem;margin:16px 0 22px}
+th{text-align:left;font:600 .72rem/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);padding:0 12px 10px 0;border-bottom:1px solid var(--rule2)}
+td{padding:10px 12px 10px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+/* a long unbroken word in prose (a pasted file path) wraps instead of widening the page; break-word
+   only breaks when the word cannot fit, so normal text is unchanged */
+main p,main li{overflow-wrap:break-word}
+/* long identifiers in cells (`provider_notification_id`) may break on narrow windows only, so a table never pushes
+   the page sideways there; wide windows keep identifiers whole */
+@media (max-width:1000px){td code,th code{overflow-wrap:anywhere}}
+.tw{overflow-x:auto}
+pre{background:var(--surface);border:1px solid var(--rule);border-radius:11px;padding:16px 18px;overflow-x:auto;
+  font:.775rem/1.58 var(--mono);color:var(--ink2);margin:16px 0;white-space:pre}
+pre b{color:var(--gold);font-weight:inherit}
+pre .c{color:var(--ink3)}
+ul,ol{margin:0 0 14px;padding-left:22px;max-width:var(--measure)}
+li{margin-bottom:7px}
+li::marker{color:var(--ink3)}
+ul.opts{list-style:none;padding-left:4px}
+ul.opts li{margin-bottom:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:16px 18px}
+.card h4{margin:0 0 8px;font-size:.906rem}
+.card p{margin:0;font-size:.875rem;color:var(--ink2);max-width:none}
+.step{display:grid;grid-template-columns:72px minmax(0,1fr);gap:14px;padding:12px 0;border-top:1px solid var(--rule);max-width:calc(var(--measure) + 64px)}
+.step .sk{font:600 .72rem/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gold);padding-top:2px}
+.mantras{display:grid;gap:8px;margin:18px 0 8px;max-width:calc(var(--measure) + 64px)}
+.mantras div{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:12px 16px;font-size:.9375rem}
+.mantras b{color:var(--gold)}
+/* a prefilled ticket the user copies into the tracker by hand */
+.ticket{background:var(--surface);border:1px solid var(--rule2);border-radius:12px;padding:18px 22px;margin:18px 0;max-width:calc(var(--measure) + 64px)}
+.ticket .t-h{font:600 .72rem/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px}
+.ticket .t-title{font-size:1.0625rem;font-weight:640;margin:0 0 10px}
+.ticket .t-meta{font:400 .78rem/1.5 var(--mono);color:var(--ink3);margin-bottom:12px}
+.ticket h4{margin:14px 0 4px;font-size:.875rem;font-weight:640;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+.ticket p,.ticket ul{margin-bottom:8px;font-size:.9375rem}
+.ticket li{margin-bottom:4px}
+footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--rule);font-size:.844rem;color:var(--ink3)}
+.env{font:400 .72rem/1.5 var(--mono);color:var(--ink3);margin-top:8px}
+
+/* ===== top bar: Contents (top left) mirrors View ★s (top right); the theme toggle sits next to View ★s ===== */
+.topbtn{position:fixed;top:14px;z-index:30;display:flex;align-items:center;gap:6px;border:1px solid var(--rule2);
+  background:var(--surface);color:var(--ink2);border-radius:999px;padding:6px 12px;font:600 .75rem/1 var(--mono);
+  cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.topbtn:hover{color:var(--ink);border-color:var(--gold)}
+#toc-toggle{left:var(--edge)}
+#toc-toggle[aria-expanded="true"]{border-color:var(--gold);color:var(--ink)}
+#stars-open{right:var(--edge)}
+#stars-open svg{width:14px;height:14px;color:var(--star)}
+#stars-open svg path{fill:currentColor}
+#stars-open .lbl{display:inline-flex;align-items:center;gap:4px}
+#stars-open .ss{display:inline-flex;align-items:center}
+#stars-open .count{font-weight:600;color:var(--ink3);margin-left:4px}
+#theme-toggle{right:calc(var(--edge) + var(--stars-w, 112px) + 8px)}
+
+/* ===== contents pane: fixed, never part of the article's flow =====
+   Wide windows: it sits in the article's reserved left gutter. Narrow windows: it slides over the page. */
+aside.side{position:fixed;top:0;left:max(0px, calc(var(--edge) - 24px));bottom:0;z-index:20;width:calc(var(--side-w) + 32px);
+  padding:60px 16px 32px 24px;overflow:auto;scrollbar-width:thin;background:var(--bg);
+  transform:translateX(-102%);transition:transform .18s ease,visibility .18s;visibility:hidden}
+:root.toc-open aside.side{transform:none;visibility:visible}
+aside.side .side-h{font:600 .6875rem/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin:0 0 12px}
+aside.side ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--rule)}
+aside.side li{margin:0}
+aside.side a{display:block;border:0;padding:5px 0 5px 14px;margin-left:-1px;border-left:2px solid transparent;color:var(--ink3);font-size:.844rem;line-height:1.35}
+aside.side a:hover{color:var(--ink)}
+aside.side a.active{color:var(--ink);border-left-color:var(--gold);font-weight:600}
+aside.side a .tn{font:600 .656rem/1 var(--mono);color:var(--gold);margin-right:6px}
+aside.side a .chip{margin:4px 4px 0 0;display:inline-block;padding:3px 6px;font-size:.6rem}
+@media (max-width:1000px){
+  :root{--pad:16px;--edge:16px}
+  aside.side{left:0}
+  .wrap{margin-left:auto;max-width:none}
+  aside.side{background:var(--surface);box-shadow:4px 0 24px rgba(0,0,0,.18);width:min(86vw,340px)}
+  .grid2{grid-template-columns:1fr}
+}
+
+/* ===== messages =====
+   Every message is a .msg block with a stable id. The user is .msg.user, labelled "Me" (the reader);
+   the AI is .msg.ai, labelled with its logo, name and model in the vendor colour. qa-pass.js adds the
+   pass label and the star to each .who line. */
+.msg{position:relative;margin:18px 0;max-width:calc(var(--measure) + 64px)}
+/* the .who line keeps the body font so its ch-based max-width matches the user's box; its parts set the mono label font */
+.msg>.who{display:flex;align-items:center;gap:8px;margin:0 0 10px;min-height:22px;line-height:1.2}
+.msg>.who .me{font:600 .72rem/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--user)}
+.msg .pass{font:500 .72rem/1.2 var(--mono);color:var(--ink3);letter-spacing:.04em}
+.msg.user{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--user);border-radius:0 10px 10px 0;padding:14px 20px}
+.msg.user p,.msg.user li{color:var(--ink2);font-size:.9375rem;max-width:none}
+.msg.user p:last-child{margin-bottom:0}
+.msg.ai{max-width:none}
+.msg.ai>.who{max-width:calc(var(--measure) + 64px);padding-right:20px}
+details.earlier>.msg.ai>.who{max-width:none;padding-right:0}
+.msg.ai>p,.msg.ai>ul,.msg.ai>ol{max-width:var(--measure)}
+.ai-label{display:inline-flex;align-items:center;gap:6px;font:600 .78rem/1.2 var(--mono);letter-spacing:.02em}
+.ai-label svg{width:16px;height:16px;flex:none}
+.ai-label .ai-model{font-weight:500}
+.ai-claude{color:var(--ai-claude)} .ai-openai{color:var(--ai-openai)} .ai-gemini{color:var(--ai-gemini)} .ai-other{color:var(--ai-other)}
+.star{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:0;background:transparent;
+  color:var(--ink3);cursor:pointer;border-radius:6px;padding:0;opacity:.6;transition:opacity .12s,color .12s}
+.star svg{width:16px;height:16px}
+.star svg path{fill:none}
+.star:hover{opacity:1;color:var(--ink2);background:var(--surface2)}
+.star[aria-pressed="true"]{opacity:1;color:var(--star)}
+.star[aria-pressed="true"] svg path{fill:currentColor}
+.flash{animation:flash 1.8s ease}
+h2.flash,li.flash,.call.flash{border-radius:6px}
+@keyframes flash{0%,45%{box-shadow:0 0 0 3px color-mix(in oklab,var(--star) 70%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
+
+/* earlier rounds of a subject: one fold, every message in its original formatting (lists, tables, figures) */
+details.earlier{margin:6px 0 14px;border:1px dashed var(--rule2);border-radius:10px;background:var(--surface2)}
+details.earlier>summary{cursor:pointer;padding:9px 14px;font:600 .6875rem/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+details.earlier[open]>summary{border-bottom:1px dashed var(--rule2)}
+details.earlier>.msg{margin:0;padding:14px 18px;border:0;border-top:1px dashed var(--rule2);border-radius:0;background:transparent;max-width:none}
+details.earlier>summary+.msg{border-top:0}
+details.earlier>.msg.user{box-shadow:inset 3px 0 0 var(--user)}
+details.earlier>.msg.ai{box-shadow:inset 3px 0 0 color-mix(in oklab,var(--ai-claude) 60%,transparent)}
+details.earlier .msg p,details.earlier .msg li{color:var(--ink2);font-size:.9375rem}
+details.earlier .msg h3{font-size:1rem}
+details.earlier .msg .call,details.earlier .msg .card,details.earlier .msg pre,details.earlier .msg .ticket{background:var(--surface)}
+
+/* optional material inside an answer (prefilled tickets, long tables): a plain fold, not a thread */
+details.more{margin:16px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surface2);max-width:calc(var(--measure) + 64px)}
+details.more>summary{cursor:pointer;padding:10px 14px;font:600 .72rem/1.4 var(--mono);letter-spacing:.06em;color:var(--ink2)}
+details.more[open]>summary{border-bottom:1px solid var(--rule)}
+details.more>:not(summary){margin-left:14px;margin-right:14px}
+
+/* ===== starred messages dialog: a reference list, never the full messages ===== */
+dialog#stars-dialog{border:1px solid var(--rule2);border-radius:14px;background:var(--surface);color:var(--ink);padding:0;
+  width:min(720px,92vw);max-height:min(78vh,820px);box-shadow:0 18px 60px rgba(0,0,0,.28)}
+dialog#stars-dialog::backdrop{background:rgba(10,9,8,.42)}
+.sd-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--rule)}
+.sd-head h3{margin:0;font-size:1rem;display:flex;align-items:center;gap:6px}
+.sd-head h3 svg{width:16px;height:16px;color:var(--star)}
+.sd-head h3 svg path{fill:currentColor}
+.sd-head .sp{flex:1}
+.sd-btn{border:1px solid var(--rule2);background:var(--surface);color:var(--ink2);border-radius:6px;font:600 .72rem/1 var(--mono);padding:6px 9px;cursor:pointer}
+.sd-btn:hover{color:var(--ink);border-color:var(--gold)}
+.sd-body{overflow:auto;max-height:calc(min(78vh,820px) - 104px);padding:6px 0 10px}
+.sd-group{padding:10px 18px 2px}
+.sd-group h4{margin:0 0 4px;font:600 .72rem/1.4 var(--mono);letter-spacing:.06em;color:var(--ink3);text-transform:uppercase}
+.sd-group h4 .tn{color:var(--gold);margin-right:6px}
+.sd-row{display:grid;grid-template-columns:26px minmax(0,1fr);gap:6px;align-items:start;padding:6px 0;border-top:1px solid var(--rule)}
+.sd-group h4+.sd-row{border-top:0}
+.sd-row .star{margin:0;opacity:1}
+.sd-row button.go{all:unset;cursor:pointer;display:block;min-width:0}
+.sd-row button.go:hover .ex{color:var(--ink)}
+.sd-row button.go:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:4px}
+.sd-row .by{font:600 .69rem/1.4 var(--mono);display:flex;gap:6px;align-items:center}
+.sd-row .by .ai-label{font-size:.69rem}
+.sd-row .by .ai-label svg{width:13px;height:13px}
+.sd-row .by .u{color:var(--user);letter-spacing:.08em;text-transform:uppercase}
+.sd-row .by .pass{color:var(--ink3);font-weight:500}
+.sd-row .ex{font-size:.875rem;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sd-row.gone .ex{color:var(--ink3);font-style:italic}
+.sd-empty{padding:28px 18px;color:var(--ink3);font-size:.9rem}
+.sd-foot{padding:10px 18px;border-top:1px solid var(--rule);font-size:.75rem;color:var(--ink3)}
+.sd-foot.warn{color:var(--ink);background:color-mix(in srgb, #f59e0b 14%, transparent)}
+
+/* ===== figures ===== */
+figure{margin:18px 0 22px}
+figure img{max-width:100%;height:auto;border:1px solid var(--rule);border-radius:10px;background:#fff}
+:root[data-theme="dark"] figure img{filter:brightness(.92)}
+figcaption{font-size:.8125rem;color:var(--ink3);margin-top:6px;max-width:var(--measure)}
+h2+.chip+.chip{margin-left:0}
+@media(max-width:700px){.wrap{padding:0 16px 64px}}
