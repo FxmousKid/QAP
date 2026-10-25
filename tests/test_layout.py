@@ -133,6 +133,15 @@ class Writing(Fixture):
         with self.assertRaises(L.LayoutError):
             L.make_folder(self.root, "work")
 
+    def test_remove_folder_only_when_empty(self):
+        L.make_folder(self.root, "tmp-folder", title="Tmp")
+        with self.assertRaises(L.LayoutError):
+            L.remove_folder(self.root, "db")  # holds subjects
+        with self.assertRaises(L.LayoutError):
+            L.remove_folder(self.root, "db/interaction")  # a subject
+        L.remove_folder(self.root, "tmp-folder")
+        self.assertFalse((self.root / "tmp-folder").exists())
+
     def test_set_meta(self):
         L.set_meta(self.root, "db", title="DB v3", icon="database", color="#123456")
         self.assertEqual(L.read_json(self.root / "db/folder.json")["title"], "DB v3")

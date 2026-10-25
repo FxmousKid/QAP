@@ -16,8 +16,10 @@ export function el(tag, attrs = {}, ...children) {
 
 // ---- toast: one line at the bottom, with an optional action (Undo) ----
 let toastTimer = 0;
-export function toast(message, { error = false, action = null, ms = 5000 } = {}) {
+export function toast(message, { error = false, action = null, ms = action ? 10000 : 5000 } = {}) {
   const box = document.getElementById("toast");
+  box.onmouseenter = () => clearTimeout(toastTimer);
+  box.onmouseleave = () => { toastTimer = setTimeout(hide, 3000); };
   box.replaceChildren(el("span", { text: message }));
   if (action) box.append(el("button", { type: "button", text: action.label, onclick: () => { hide(); action.run(); } }));
   box.classList.toggle("err", error);

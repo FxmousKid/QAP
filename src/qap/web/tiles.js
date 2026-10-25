@@ -23,13 +23,13 @@ function tile(node, ctx) {
   const link = el("a", { class: "tile" + (isFolder ? " is-folder" : ""), href: href(node.path), draggable: "true",
     title: node.title + (isFolder ? "" : node.qa_project ? `  ·  qa-project ${node.qa_project}` : "") },
     el("span", { class: "glyph" }, glyph(node.icon, defaultIcon(node))),
-    el("span", { class: "label", text: node.title }),
+    el("span", { class: "label", text: node.title.replace(/-/g, "\u2011") }), // no line break at a hyphen
     isFolder ? null : el("span", { class: "badge", title: `${node.count} passes`, text: String(node.count) }));
   const under = el("div", { class: "under" });
   if (isFolder) {
     const kids = node.children.slice(0, 6).map((c) => c.icon && !/^[\x00-\x7F]*$/.test(c.icon) ? c.icon : "").join("");
     under.append(`${node.subjects} subject${node.subjects === 1 ? "" : "s"}`);
-    if (kids) under.append(" · ", el("span", { class: "kids", text: kids }));
+    if (kids) under.append(el("span", { class: "kids", text: kids }));
   } else {
     under.textContent = `${node.count} pass${node.count === 1 ? "" : "es"} · ${shortDate(node.updated)}`;
   }
@@ -54,6 +54,7 @@ function actions(node, ctx) {
     { label: "Icon and colour…", run: () => editIcon(node, ctx) },
     { label: "Move to…", run: () => moveItem(node, ctx) });
   if (node.kind === "folder") list.push({ label: "New folder inside…", run: () => newFolder(node.path, ctx) });
+  if (node.kind === "folder" && !node.children.length) list.push("-", { label: "Delete this empty folder", run: () => removeFolder(node, ctx) });
   return list;
 }
 
@@ -109,6 +110,11 @@ async function doMove(src, dest, ctx) {
 async function moveItem(node, ctx) {
   const dest = await moveDialog(ctx.tree(), node);
   if (dest !== null && dest !== undefined) doMove(node.path, dest, ctx);
+}
+
+async function removeFolder(node, ctx) {
+  try { await api.rmdir(node.path); await ctx.refresh(); toast(`Deleted ${node.title}`); }
+  catch (x) { toast(x.message, { error: true }); }
 }
 
 async function renameItem(node, ctx) {

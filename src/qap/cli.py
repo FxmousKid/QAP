@@ -62,7 +62,8 @@ def pick_subject(args, ref: str | None, what: str = "subject") -> dict:
     if not subjects:
         raise Fail(f"no subject under {root} yet (create one with `qap new-subject`)")
     value = prompt.choose(f"Which {what}?", [(s["path"], f"{show_icon(s['icon'])} {s['title']}  ({s['path']}, "
-                                                          f"{s['count']} passes)") for s in subjects])
+                                                          f"{s['count']} pass{'es' if s['count'] != 1 else ''})")
+                                             for s in subjects])
     return L.resolve(root, value, "subject")
 
 
@@ -142,7 +143,8 @@ def cmd_list(args) -> None:
                 draw(child, depth + 1)
             return
         when = node["updated"][:10] if node["updated"] else "—"
-        lines.append(f"{pad}{show_icon(node['icon'])} {node['title']}  {node['path']}  · {node['count']} passes"
+        lines.append(f"{pad}{show_icon(node['icon'])} {node['title']}  {node['path']}  · {node['count']} "
+                     f"pass{'es' if node['count'] != 1 else ''}"
                      f" · latest {node['latest'] or '—'} · {when}")
         if args.passes:
             for p in node["passes"]:
@@ -251,6 +253,14 @@ def cmd_mv(args) -> None:
     result = L.move(root, src, dest)
     emit(args, result, f"moved {result['from']} -> {result['path']}"
          + "".join(f"\n  relinked {r}" for r in result["relinked"]))
+
+
+def cmd_rmdir(args) -> None:
+    root = root_of(args)
+    node = L.resolve(root, args.path, "folder")
+    go_ahead(args, f"Remove the empty folder {node['path']}?")
+    result = L.remove_folder(root, node["path"])
+    emit(args, result, f"removed {result['path']}/")
 
 
 def cmd_rename(args) -> None:
@@ -411,6 +421,9 @@ def parser() -> argparse.ArgumentParser:
     p = add("mv", cmd_mv, "move a subject or folder into a folder (or to a new path: move and rename)")
     p.add_argument("src", nargs="?")
     p.add_argument("dest", nargs="?", help="a folder ('/' = top level), or a new path")
+
+    p = add("rmdir", cmd_rmdir, "remove an empty folder (subjects and non-empty folders are refused)")
+    p.add_argument("path")
 
     p = add("rename", cmd_rename, "change the title shown on a tile (the folder name on disk stays)")
     p.add_argument("path")

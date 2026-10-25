@@ -50,9 +50,9 @@ function renderCrumbs(node) {
     items.push(el("span", { class: "sep", text: "/" }));
     const here = i === parts.length - 1;
     const label = [glyph(n.icon, n.kind === "folder" ? "folder" : "doc"), el("span", { text: n.title })];
-    if (here) items.push(el("span", { class: "here", "aria-current": "page" }, label));
+    if (here) items.push(el("span", { class: "here", "aria-current": "page", title: n.title }, label));
     else {
-      const a = el("a", { href: href(p) }, label);
+      const a = el("a", { href: href(p), title: n.title }, label);
       dropTarget(a, p, ctx);
       items.push(a);
     }

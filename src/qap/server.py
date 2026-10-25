@@ -11,6 +11,7 @@ localStorage per origin. Served from here, every pass of a subject (and the dash
   POST /api/mv            {src, dest}                            -> layout.move
   POST /api/rename        {path, title}                          -> layout.set_meta
   POST /api/icon          {path, icon?, color?}                  -> layout.set_meta
+  POST /api/rmdir         {path}                                 -> layout.remove_folder (empty folders only)
 
 Writes are refused unless the request comes from this origin (Host and Origin checked, JSON body), so a web
 page elsewhere cannot drive them; the Host check also stops DNS-rebinding reads.
@@ -210,7 +211,11 @@ def act_icon(root: Path, body: dict) -> dict:
     return {"path": node["path"], "icon": node["icon"], "color": node["color"]}
 
 
-ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_icon}
+def act_rmdir(root: Path, body: dict) -> dict:
+    return L.remove_folder(root, _text(body, "path"))
+
+
+ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_icon, "rmdir": act_rmdir}
 
 
 # ------------------------------------------------------------------ entry point

@@ -9,7 +9,7 @@ export async function loadIcons() {
 
 export function iconNames() { return Object.keys(builtin); }
 
-// The colours of the dotfiles map; an item with no colour of its own gets one from its path, so it keeps it.
+// The colours of the dotfiles map; an item with no colour of its own gets one from its name.
 export const PALETTE = ["#5E60CE", "#0F8B8D", "#F46D01", "#2F6FDB", "#8338EC", "#1E9E3A", "#D6304F",
   "#0B66C3", "#A8650C", "#7B2CBF", "#138FA3", "#C15F3C"];
 
@@ -22,7 +22,9 @@ function hash(text) {
 export function colorOf(node) {
   if (node.color) return node.color;
   if (builtin[node.icon]) return builtin[node.icon].color;
-  return PALETTE[hash(node.path || node.title || "") % PALETTE.length];
+  // From the folder's own name, not its path: a tile keeps its colour when it moves.
+  const name = node.name || (node.path || "").split("/").pop() || node.title || "";
+  return PALETTE[hash(name) % PALETTE.length];
 }
 
 export function defaultIcon(node) { return node.kind === "folder" ? "folder" : "doc"; }

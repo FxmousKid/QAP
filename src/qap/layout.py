@@ -270,6 +270,27 @@ def make_subject(root: Path, rel: str, title: str | None = None, icon: str | Non
     return subject_node(root, path, False)
 
 
+def remove_folder(root: Path, rel: str) -> dict:
+    """Delete an empty folder (its folder.json included). Subjects and non-empty folders are refused:
+    nothing that holds a pass is ever deleted by qap."""
+    rel = clean_rel(rel)
+    if not rel:
+        raise LayoutError("cannot remove the content root")
+    path = abs_path(root, rel)
+    if not path.is_dir():
+        raise LayoutError(f"{rel} does not exist")
+    if is_subject_dir(path):
+        raise LayoutError(f"{rel} is a subject; qap never deletes passes (move it instead)")
+    left = [p.name for p in path.iterdir() if p.name != FOLDER_FILE and p.name != ".DS_Store"]
+    if left:
+        raise LayoutError(f"{rel} is not empty ({', '.join(sorted(left)[:5])}); move what it holds first")
+    for p in path.iterdir():
+        p.unlink()
+    path.rmdir()
+    _order_remove(root, rel.rsplit("/", 1)[0] if "/" in rel else "", path.name)
+    return {"path": rel}
+
+
 def set_meta(root: Path, rel: str, **fields) -> dict:
     """Update a folder's or subject's manifest (title, icon, color, qa_project, order). None leaves a field as is;
     '' clears it. The root folder's title and icon live in <root>/folder.json."""

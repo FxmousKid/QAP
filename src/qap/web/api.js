@@ -19,6 +19,7 @@ export const api = {
   mv: (src, dest) => call("/api/mv", { src, dest }),
   rename: (path, title) => call("/api/rename", { path, title }),
   icon: (path, icon, color) => call("/api/icon", { path, icon, color }),
+  rmdir: (path) => call("/api/rmdir", { path }),
 };
 
 // A page of the content, as the server serves it.
