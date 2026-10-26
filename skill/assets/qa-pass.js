@@ -273,8 +273,8 @@
 
   // ---- "back to where I clicked" ----
   // A jump through an in-page link (or a row of the stars dialog) records where the reader was: the link
-  // itself and its height on the screen. A small, faint button then shows near the top left of the article
-  // (the same row as Contents and View ★s; next to Contents on narrow windows). It returns to the link,
+  // itself and its height on the screen. A small, faint button then shows in the top row, right of
+  // ☰ Contents ("↩ Back to subject 05", "↩ Back to What I need from you"). It returns to the link,
   // opening the folds around it if they were closed, and flashes it. Jumps stack: after one return the
   // button offers the previous origin, until none is left. It fades out by itself 20 s after the last jump
   // (hovering it keeps it), and comes back with the next jump. Each jump is a history entry, so the
@@ -300,26 +300,20 @@
   }
 
   function placeBack() {
-    // Wide windows: aligned with the article's text (its left edge plus its padding), never the window's edge.
-    // Narrow windows: docked in the top row, in the room between Contents and the theme toggle, so it never
-    // covers the header or the line a jump lands on (60 px down). With little room it keeps only its arrow
-    // ("+N" becomes a corner badge); with none (the smallest phones) it moves to the bottom left corner.
-    var main = document.querySelector("main");
-    if (!main) return;
+    // Docked in the top row, right of ☰ Contents, in the room before the theme toggle, on every layout: it
+    // never covers the header or the line a jump lands on (60 px down). With little room it keeps only its
+    // arrow ("+N" becomes a corner badge; the full label stays in its tooltip and aria-label); with none (the
+    // smallest phones) it moves to the bottom left corner.
+    var toc = document.getElementById("toc-toggle");
+    var theme = document.getElementById("theme-toggle");
     var b = document.getElementById("back-to-link");
-    var room = 0;
-    var left = main.getBoundingClientRect().left + (parseFloat(getComputedStyle(main).paddingLeft) || 0);
-    if (narrow()) {
-      var toc = document.getElementById("toc-toggle");
-      var theme = document.getElementById("theme-toggle");
-      left = toc ? toc.getBoundingClientRect().right + 8 : 16;
-      room = Math.floor((theme ? theme.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
-      root.style.setProperty("--back-room", Math.max(0, room) + "px");
-    }
+    var left = toc ? toc.getBoundingClientRect().right + 8 : 16;
+    var room = Math.floor((theme ? theme.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
     root.style.setProperty("--back-left", Math.round(left) + "px");
+    root.style.setProperty("--back-room", Math.max(0, room) + "px");
     if (b) {
-      b.classList.toggle("compact", narrow() && room < 96);
-      b.classList.toggle("low", narrow() && room < 30);
+      b.classList.toggle("compact", room < 96);
+      b.classList.toggle("low", room < 30);
     }
   }
 
@@ -355,9 +349,13 @@
     if (!origins.length) return hideBack();
     var b = backButton();
     var o = origins[origins.length - 1];
-    b.querySelector(".bk-text").textContent = "Back to " + (o.el ? whereIs(o.el) : "where you were");
+    var label = "Back to " + (o.el ? whereIs(o.el) : "where you were");
+    var more = origins.length > 1 ? "; " + (origins.length - 1) + " more jump(s) before it" : "";
+    b.querySelector(".bk-text").textContent = label;
     b.querySelector(".bk-more").textContent = origins.length > 1 ? "+" + (origins.length - 1) : "";
-    b.title = "Return to the link you clicked (b)" + (origins.length > 1 ? "; " + (origins.length - 1) + " more jump(s) before it" : "");
+    // The label also lives in the tooltip and the accessible name: a narrow window shows only the arrow.
+    b.title = label + ": return to the link you clicked (b)" + more;
+    b.setAttribute("aria-label", label + more);
     placeBack();
     b.hidden = false;
     b.classList.remove("fading");

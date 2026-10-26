@@ -33,10 +33,11 @@ The page comes with this behaviour built in; you never write it by hand:
   the text to any `#id` (a subject, a need item, a decision box, a folded message) does the same, and the
   browser's Back returns to the sentence the reader clicked.
 - **Back to where I clicked.** After a jump through a link in the text (or a row of View ★s), a faint
-  "↩ Back to subject NN" button shows on the top row, at the article's left edge (next to Contents on narrow
-  windows, so it never covers the header or the line a jump lands on). It returns to the link, reopening its
-  folds, and flashes it. Jumps stack ("+2"); it fades 20 s after the last jump (hovering keeps it) and hides
-  once nothing is left to return to. The browser's Back does the same thing; the key is `b`.
+  "↩ Back to subject NN" (or "↩ Back to What I need from you") button shows in the top row, right of
+  ☰ Contents, so it never covers the header or the line a jump lands on; on a phone it keeps only its arrow
+  (the label stays in its tooltip). It returns to the link, reopening its folds, and flashes it. Jumps stack
+  ("+2"); it fades 20 s after the last jump (hovering keeps it) and hides once nothing is left to return to.
+  The browser's Back does the same thing; the key is `b`.
 - **Responsive to the screen.** The page detects the pixel ratio, the window width tier (`xs`…`xxl`) and
   ultrawide screens, sets them on `<html>` (`data-dpr`, `data-size`, `data-ultrawide`), and re-detects on
   resize, zoom or a move to another screen.
@@ -290,7 +291,7 @@ A QA pass is read by someone deciding. A good chart decides faster than three pa
    - Check both themes (click `#theme-toggle`); that the article does not move when `#toc-toggle` opens or
      closes the pane (compare `main.getBoundingClientRect().left`); star two messages, one in a fold, open
      `#stars-open`, and click a row: the fold opens and the message flashes. Then unstar those two. Click one
-     "subject NN" link and one link into a fold; the "↩ Back to …" button appears top left and returns
+     "subject NN" link and one link into a fold; the "↩ Back to …" button appears right of Contents and returns
      to the link.
    - **Never clear `localStorage` in a render check.** The Playwright browser can be the user's own profile:
      its storage holds their stars and theme. Undo only what the check itself set.
