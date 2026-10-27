@@ -22,6 +22,8 @@ EPILOG = """examples:
   qap new-subject coach/billing --title "Billing" --icon money --qa-project billing
   qap mkdir work --title "Work" --icon 💼
   qap mv authz work                         move a folder (or a subject) into another folder
+  qap project new personal --title Personal --icon 🏡    a project: work and personal folders never mix
+  qap project move side-projects personal   put a top-level folder (a family) in a project
   qap place ~/old/choices brain/prd16       move a folder of passes in; leaves a symlink behind
   qap serve --open                          the dashboard on http://127.0.0.1:8750
 """
@@ -118,7 +120,7 @@ def cmd_config(args) -> None:
 
 
 def _strip(node: dict, with_passes: bool) -> dict:
-    out = {k: v for k, v in node.items() if k not in ("children", "passes")}
+    out = {k: v for k, v in node.items() if k not in ("children", "passes", "projects")}
     if node["kind"] == "folder":
         out["children"] = [_strip(c, with_passes) for c in node["children"]]
     elif with_passes:
@@ -150,9 +152,23 @@ def cmd_list(args) -> None:
             for p in node["passes"]:
                 lines.append(f"{pad}    {p['label']:>4}  {p['file']}  {p['mtime'][:10]}  {p.get('title', '')[:70]}")
 
-    for child in tree.get("children", []) if tree["kind"] == "folder" else [tree]:
-        draw(child, 1)
-    emit(args, {"root": str(root), "tree": _strip(tree, args.passes)}, "\n".join(lines))
+    top = tree.get("children", []) if tree["kind"] == "folder" else [tree]
+    projects = (tree.get("projects") or []) if not args.path else []
+    for project in projects:
+        lines.append(f"  {show_icon(project['icon'])} {project['title']}  @{project['id']}"
+                     f"{'  (default)' if project['default'] else ''}  · {_count(project['families'], 'family', 'families')}"
+                     f" · {_count(project['subjects'], 'subject')}")
+        for child in top:
+            if child.get("project") == project["id"]:
+                draw(child, 2)
+    for child in top:
+        if not projects or not child.get("project"):
+            draw(child, 1)
+    emit(args, {"root": str(root), "projects": projects, "tree": _strip(tree, args.passes)}, "\n".join(lines))
+
+
+def _count(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
 
 
 def _where(root: Path, node: dict) -> dict:
@@ -209,7 +225,7 @@ def cmd_new_subject(args) -> None:
         qa_project = prompt.ask("qa-project (the pages' <meta name=\"qa-project\">; stars are kept per project)",
                                 path.rsplit("/", 1)[-1])
     go_ahead(args, f"Create subject {path}?")
-    node = L.make_subject(root, path, title=title, icon=icon, qa_project=qa_project)
+    node = L.make_subject(root, path, title=title, icon=icon, qa_project=qa_project, project=args.project)
     d = L.abs_path(root, node["path"])
     emit(args, {"subject": node["path"], "dir": str(d), "next": P.next_pass(d)},
          f"created {d}\n  next: `qap carry {node['path']}` starts pass 1 from the template")
@@ -226,7 +242,7 @@ def cmd_mkdir(args) -> None:
         name = prompt.ask("Folder name", L.slug(args.title))
         path = f"{parent}/{name}" if parent else name
     icon = pick_icon(args, args.icon)
-    node = L.make_folder(root, path, title=args.title, icon=icon)
+    node = L.make_folder(root, path, title=args.title, icon=icon, project=args.project)
     emit(args, {"folder": node["path"], "dir": str(L.abs_path(root, node["path"]))}, f"created {node['path']}/")
 
 
@@ -243,6 +259,14 @@ def cmd_mv(args) -> None:
     else:
         src = L.resolve(root, src)["path"]
     dest = args.dest
+    if dest and dest.strip().startswith("@"):
+        project = L.find_project(root, dest)
+        go_ahead(args, f"Put {src} in project {project['title']}?")
+        result = L.assign_project(root, src, project["path"])
+        emit(args, result, f"{result['path']} is in {project['title']} now"
+             + (f" (moved up from {result['from']})" if not result["from"].startswith("@") and result["from"] else "")
+             + "".join(f"\n  relinked {r}" for r in result["relinked"]))
+        return
     if dest is None:
         dest = pick_folder(args, None, f"Move {src} into which folder?")
     elif dest.strip("/") and not L.abs_path(root, dest).exists():
@@ -306,6 +330,70 @@ def cmd_place(args) -> None:
                      icon=icons.validate(args.icon), force=args.force)
     emit(args, result, f"placed {len(result['moved'])} file(s) in {result['subject']}"
          + "".join(f"\n  link {line}" for line in result["links"]))
+
+
+def cmd_project(args) -> None:
+    """qap project [list] | new <id> | move <folder|subject> <project> | set <project> | rm <project>"""
+    root = root_of(args)
+    action = args.action or "list"
+    if action == "list":
+        nodes = L.projects(root)
+        lines = [f"{show_icon(p['icon'])} {p['title']}  @{p['id']}{'  (default)' if p['default'] else ''}  · "
+                 f"{_count(p['families'], 'family', 'families')} · {_count(p['subjects'], 'subject')}"
+                 + "".join(f"\n    {m}" for m in p["members"]) for p in nodes]
+        emit(args, {"projects": nodes}, "\n".join(lines) or "no project yet: `qap project new work --title Work` "
+                                                          "puts every top-level folder in it")
+        return
+    if action == "new":
+        name = args.name or (prompt.ask("Project id (work, personal…)") if prompt.interactive(args) else None)
+        if not name:
+            raise Fail("give the project an id, for example `qap project new personal --title Personal`")
+        title = args.title or (prompt.ask("Title (shown on its box)", L.pretty(name)) if prompt.interactive(args)
+                               else None)
+        node = L.make_project(root, name, title=title, icon=pick_icon(args, args.icon),
+                              color=icons.validate_color(args.color), default=args.default)
+        emit(args, {"project": node}, f"created {node['path']} ({node['title']})"
+             + (": the default, so every top-level folder without a project is in it" if node["default"] else ""))
+        return
+    if action == "move":
+        if not args.name:
+            if not prompt.interactive(args):
+                raise Fail("give the folder or subject, then the project: qap project move <path> <project>")
+            items = [n for n in L.walk(L.tree(root, False)) if n["path"]]
+            args.name = prompt.choose("Which folder or subject?", [
+                (n["path"], ("  " * n["path"].count("/")) + f"{show_icon(n['icon'])} {n['title']}  ({n['path']})")
+                for n in items])
+        if not args.target:
+            if not prompt.interactive(args):
+                raise Fail("give the project: qap project move <path> <project>")
+            args.target = prompt.choose("Into which project?", [(p["path"], f"{show_icon(p['icon'])} {p['title']}")
+                                                                for p in L.projects(root)])
+        node = L.resolve(root, args.name)
+        project = L.find_project(root, args.target)
+        if "/" in node["path"]:
+            go_ahead(args, f"{node['path']} is not at the top level: move it up to the top level and into "
+                           f"{project['title']}?")
+        result = L.assign_project(root, node["path"], project["path"])
+        emit(args, result, f"{result['path']} is in {project['title']} now"
+             + "".join(f"\n  relinked {r}" for r in result["relinked"]))
+        return
+    if action == "set":
+        if not args.name:
+            raise Fail("give the project: qap project set <project> [--title] [--icon] [--color] [--default]")
+        node = L.set_project_meta(root, args.name, title=args.title, icon=icons.validate(args.icon),
+                                  color=icons.validate_color(args.color), default=args.default or None)
+        emit(args, {"project": node}, f"{node['path']}: {node['title']}, icon {show_icon(node['icon'])}"
+             + (", the default" if node["default"] else ""))
+        return
+    if action == "rm":
+        if not args.name:
+            raise Fail("give the project to remove (it must be empty)")
+        node = L.find_project(root, args.name)
+        go_ahead(args, f"Remove the empty project {node['title']}?")
+        result = L.remove_project(root, node["path"])
+        emit(args, result, f"removed {result['path']}")
+        return
+    raise Fail(f"unknown action {action!r}: list, new, move, set or rm")
 
 
 def cmd_carry(args) -> None:
@@ -412,15 +500,27 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--title")
     p.add_argument("--icon", help="an emoji or a built-in icon name")
     p.add_argument("--qa-project", dest="qa_project", help="the pages' <meta name=\"qa-project\"> (stars key)")
+    p.add_argument("--project", help="the project (work, personal…) a new top-level folder joins; not --qa-project")
 
     p = add("mkdir", cmd_mkdir, "create a folder (parents included)")
     p.add_argument("path", nargs="?")
     p.add_argument("--title")
     p.add_argument("--icon")
+    p.add_argument("--project", help="the project (work, personal…) a new top-level folder joins")
 
     p = add("mv", cmd_mv, "move a subject or folder into a folder (or to a new path: move and rename)")
     p.add_argument("src", nargs="?")
-    p.add_argument("dest", nargs="?", help="a folder ('/' = top level), or a new path")
+    p.add_argument("dest", nargs="?", help="a folder ('/' = top level), a new path, or @project")
+
+    p = add("project", cmd_project, "projects above the top-level folders: list, new, move, set, rm")
+    p.add_argument("action", nargs="?", choices=("list", "new", "move", "set", "rm"))
+    p.add_argument("name", nargs="?", help="new/set/rm: the project id; move: the folder or subject")
+    p.add_argument("target", nargs="?", help="move: the project (@id, id or title)")
+    p.add_argument("--title")
+    p.add_argument("--icon", help="an emoji or a built-in icon name")
+    p.add_argument("--color", help="#RRGGBB")
+    p.add_argument("--default", action="store_true",
+                   help="the project of every top-level folder that names none")
 
     p = add("rmdir", cmd_rmdir, "remove an empty folder (subjects and non-empty folders are refused)")
     p.add_argument("path")

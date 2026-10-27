@@ -64,6 +64,38 @@ class CLI(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("give a subject", out["error"])
 
+    def test_projects(self):
+        self.q("new-subject", "db/interaction", "--title", "Interaction")
+        self.q("new-subject", "authz/rbac", "--title", "RBAC")
+        code, out = self.q("project")
+        self.assertEqual((code, out["projects"]), (0, []))
+        code, out = self.q("project", "new", "work", "--title", "Work", "--icon", "briefcase")
+        self.assertEqual((code, out["project"]["default"], out["project"]["members"]), (0, True, ["authz", "db"]))
+        code, out = self.q("project", "new", "personal", "--title", "Personal", "--icon", "🏡")
+        self.assertFalse(out["project"]["default"])
+        code, out = self.q("mkdir", "home", "--title", "Home", "--project", "personal")
+        self.assertEqual(code, 0)
+        code, out = self.q("project", "move", "db/interaction", "personal", "--yes")  # moved up, then in
+        self.assertEqual((code, out["path"], out["project"], out["from"]), (0, "interaction", "personal", "db"))
+        code, out = self.q("mv", "authz", "@personal", "--yes")  # mv to @project does the same
+        self.assertEqual((code, out["from"]), (0, "@work"))
+        code, out = self.q("list")
+        self.assertEqual([(p["id"], p["members"]) for p in out["projects"]],
+                         [("work", ["db"]), ("personal", ["authz", "home", "interaction"])])
+        self.assertEqual({c["path"]: c["project"] for c in out["tree"]["children"]}["db"], "work")
+        code, out = self.q("rename", "@personal", "Home life")
+        self.assertEqual(out["title"], "Home life")
+        code, out = self.q("project", "rm", "work", "--yes")
+        self.assertEqual(code, 1)  # db is still in it
+        self.assertIn("still holds db", out["error"])
+        code, out = self.q("project", "set", "personal", "--default")
+        self.assertTrue(out["project"]["default"])
+        self.assertEqual(L.read_json(self.root / "db/folder.json")["project"], "work")  # pinned: it stays in work
+        code, out = self.q("new-subject", "db/billing", "--project", "personal")
+        self.assertEqual(code, 1)  # db belongs to work
+        code, out = self.q("mkdir", "garden")  # a new family goes to the default project
+        self.assertEqual(L.find_project(self.root, "personal")["members"], ["authz", "garden", "home", "interaction"])
+
     def test_config_reports_root(self):
         code, out = self.q("config")
         self.assertEqual((code, out["content_root"], out["content_root_from"]), (0, str(self.root), "--root"))
@@ -106,6 +138,35 @@ class Server(unittest.TestCase):
         self.assertEqual(self.req("/ui/app.js")[0], 200)
         self.assertEqual(self.req("/c/../../etc/passwd")[0], 404)
         self.assertEqual(self.req("/c/db/interaction/subject.json")[0], 200)
+
+    def test_search_index(self):
+        code, body = self.req("/api/search")
+        data = json.loads(body)
+        self.assertEqual((code, data["ok"], data["projects"]), (200, True, 0))
+        self.assertEqual([i["kind"] for i in data["items"]], ["folder", "subject", "pass"])
+        self.assertEqual(self.req("/ui/search.js")[0], 200)  # pass pages load it from here
+        self.assertEqual(self.req("/ui/fuzzy.js")[0], 200)
+
+    def test_project_actions(self):
+        code, body = self.req("/api/project", {"title": "Work"})
+        self.assertEqual((code, json.loads(body)["path"]), (200, "@work"))
+        code, body = self.req("/api/project", {"title": "Personal", "icon": "home"})
+        self.assertEqual(json.loads(body)["id"], "personal")
+        code, body = self.req("/api/mkdir", {"parent": "@personal", "title": "Home"})
+        self.assertEqual(json.loads(body)["path"], "home")
+        self.assertEqual(L.read_json(self.root / "home/folder.json")["project"], "personal")
+        code, body = self.req("/api/mv", {"src": "db", "dest": "@personal"})
+        self.assertEqual((code, json.loads(body)["from"]), (200, "@work"))
+        code, body = self.req("/api/mv", {"src": "db", "dest": "@work"})  # what Undo sends
+        self.assertEqual(code, 200)
+        code, body = self.req("/api/rename", {"path": "@personal", "title": "Home life"})
+        self.assertEqual(json.loads(body)["title"], "Home life")
+        tree = json.loads(self.req("/api/tree")[1])["tree"]
+        self.assertEqual([(p["id"], p["members"]) for p in tree["projects"]], [("work", ["db"]), ("personal", ["home"])])
+        self.assertEqual(self.req("/api/rmdir", {"path": "@work"})[0], 400)  # not empty
+        code, body = self.req("/api/project", {"title": "Spare"})
+        self.assertEqual(self.req("/api/rmdir", {"path": "@spare"})[0], 200)
+        self.assertEqual(self.req("/api/project", {"title": "X"}, {"Origin": "http://evil.example"})[0], 403)
 
     def test_writes_are_guarded_and_work(self):
         self.assertEqual(self.req("/api/mkdir", {"title": "X"}, {"Origin": "http://evil.example"})[0], 403)

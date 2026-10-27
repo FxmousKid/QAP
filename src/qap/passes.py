@@ -19,6 +19,11 @@ H1 = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.S | re.I)
 TITLE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.S | re.I)
 QA_PROJECT = re.compile(r'<meta\s+name="qa-project"\s+content="([^"]*)"', re.I)
 TAGS = re.compile(r"<[^>]+>")
+KICKER = re.compile(r'<div\s+class="kicker"[^>]*>(.*?)</div>', re.S | re.I)
+H2 = re.compile(r"<h2\b([^>]*)>(.*?)</h2\s*>", re.S | re.I)
+H2_NUM = re.compile(r'<span\s+class="n"[^>]*>(.*?)</span>', re.S | re.I)
+ID_ATTR = re.compile(r'\bid="([^"]+)"')
+NOT_TEXT = re.compile(r"<!--.*?-->|<(script|style)\b[^>]*>.*?</\1\s*>", re.S | re.I)
 
 
 def parse_name(name: str) -> dict | None:
@@ -52,6 +57,40 @@ def _head_info(path: str, mtime_ns: int, size: int) -> tuple[str, str]:
 def head_info(path: Path) -> tuple[str, str]:
     st = path.stat()
     return _head_info(str(path), st.st_mtime_ns, st.st_size)
+
+
+@lru_cache(maxsize=4096)
+def _outline(path: str, mtime_ns: int, size: int) -> tuple[str, tuple[tuple[str, str, str], ...]]:
+    """(kicker, ((id, number, title), …)) of a page or source: its kicker line and every h2 with an id (the
+    subjects of the pass, "What I need from you"…). Markdown passes: their "## " lines. Cached per file version."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "", ()
+    if path.endswith(".md"):
+        heads = re.findall(r"^##\s+(.+)$", text, re.M)
+        return "", tuple((f"h{i}", "", _clean(h)) for i, h in enumerate(heads, 1))
+    text = NOT_TEXT.sub("", text)
+    kicker = KICKER.search(text)
+    sections = []
+    for m in H2.finditer(text):
+        own = ID_ATTR.search(m.group(1))
+        if not own:
+            continue
+        num = H2_NUM.search(m.group(2))
+        sections.append((own.group(1), _clean(num.group(1)) if num else "", _clean(H2_NUM.sub("", m.group(2)))))
+    return (_clean(kicker.group(1)) if kicker else ""), tuple(sections)
+
+
+def outline(subject_dir: Path, entry: dict) -> tuple[str, tuple[tuple[str, str, str], ...]]:
+    """The kicker and sections of one pass (an entry of list_passes). Read from its source when it has one (a few
+    KB; the built page carries inlined images), else from the page itself."""
+    path = subject_dir / (entry.get("src") or entry["file"])
+    try:
+        st = path.stat()
+    except OSError:
+        return "", ()
+    return _outline(str(path), st.st_mtime_ns, st.st_size)
 
 
 def _label(name: str, ext: str) -> str:

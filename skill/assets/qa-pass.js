@@ -1,6 +1,7 @@
 // QA pass page behaviour: theme toggle, the contents pane (fixed, never pushes the article) with scroll-spy,
 // screen detection (pixel ratio, width tier, ultrawide), message labels (pass + star on every message) and
-// the "View ★s" dialog, a reference list of starred messages, and the "back to where I clicked" button.
+// the "View ★s" dialog, a reference list of starred messages, the "back to where I clicked" button, and the
+// search over every pass when the page is served by `qap serve`.
 // The theme, the pane state and the pixel ratio are first applied before paint by the inline boot snippet in
 // <head> (THEME_BOOT in build.py); this file keeps them up to date.
 (function () {
@@ -18,7 +19,7 @@
     store("qa-theme", theme);
     var button = document.getElementById("theme-toggle");
     if (button) button.textContent = theme === "dark" ? "☀ Light" : "☾ Dark";
-    placeBack();  // the toggle's width changes with its label
+    placeTop();  // the toggle's width changes with its label
   }
 
   // ---- contents pane (fixed; the article reserves its gutter, so opening it moves nothing) ----
@@ -53,9 +54,17 @@
         " · pixel ratio " + Math.round(dpr * 100) / 100 + " · layout " + root.dataset.size +
         (root.dataset.ultrawide === "1" ? " · ultrawide" : "");
     }
+    placeTop();  // the top row's buttons moved (window width, star count): the back button's room follows
+  }
+
+  // The right-hand buttons sit side by side from the right edge: View ★s, the theme toggle, then Search. Each one's
+  // offset is the widths of those right of it, which change with the star count and the theme label.
+  function placeTop() {
     var stars = document.getElementById("stars-open");
+    var theme = document.getElementById("theme-toggle");
     if (stars) root.style.setProperty("--stars-w", stars.offsetWidth + "px");
-    placeBack();  // the top row's buttons moved (window width, star count): the back button's room follows
+    if (theme) root.style.setProperty("--theme-w", theme.offsetWidth + "px");
+    placeBack();
   }
 
   function watchPixelRatio() {
@@ -305,10 +314,10 @@
     // arrow ("+N" becomes a corner badge; the full label stays in its tooltip and aria-label); with none (the
     // smallest phones) it moves to the bottom left corner.
     var toc = document.getElementById("toc-toggle");
-    var theme = document.getElementById("theme-toggle");
+    var first = document.getElementById("search-open") || document.getElementById("theme-toggle");  // the right group's leftmost
     var b = document.getElementById("back-to-link");
     var left = toc ? toc.getBoundingClientRect().right + 8 : 16;
-    var room = Math.floor((theme ? theme.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
+    var room = Math.floor((first ? first.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
     root.style.setProperty("--back-left", Math.round(left) + "px");
     root.style.setProperty("--back-room", Math.max(0, room) + "px");
     if (b) {
@@ -410,6 +419,77 @@
     // After the browser's own scroll restoration, which runs after popstate.
     setTimeout(function () { restore(o); }, 0);
   });
+
+  // ---- search over every project, family, subject and pass ----
+  // Only a server has the index (GET /api/search), so this needs the page served by `qap serve`.
+  //  - Inside the dashboard's frame (same origin), the dashboard owns the search: its bar has the button (left of ‹)
+  //    and its listener on this page turns ⌘K into its dialog; / opens its pass list.
+  //  - Opened alone from qap serve, the page gets a Search button in the top row, left of the theme toggle. It loads
+  //    the dashboard's own search module (/ui/search.js) on first use; a result opens in the dashboard. ⌘K or /.
+  //  - Opened as a file (or from another server), there is no button; ⌘K or / says how to get search.
+  var SEARCH_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20.5 20.5"/></svg>';
+  var searchModule = null;
+
+  function dashboard() {
+    try { return window.parent !== window && window.parent.qapDashboard ? window.parent.qapDashboard : null; }
+    catch (e) { return null; }  // a frame from another origin
+  }
+
+  function openSearch() {
+    var dash = dashboard();
+    if (dash) { dash.openSearch(); return; }
+    if (!document.getElementById("search-open")) { searchHint(); return; }
+    if (!searchModule) searchModule = import("/ui/search.js");
+    searchModule.then(function (m) { m.configure({ prefix: "/" }); return m.openSearch(); },
+      function () { searchModule = null; searchHint(); });
+  }
+
+  function searchHint() {
+    var note = document.getElementById("search-hint");
+    if (!note) {
+      note = document.createElement("div");
+      note.id = "search-hint";
+      note.setAttribute("role", "status");
+      document.body.appendChild(note);
+    }
+    note.textContent = "Search needs the dashboard: open this pass through qap serve --open.";
+    note.hidden = false;
+    clearTimeout(note.qapTimer);
+    note.qapTimer = setTimeout(function () { note.hidden = true; }, 5000);
+  }
+
+  function setupSearch() {
+    document.addEventListener("keydown", function (e) {
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        if (dashboard()) return;  // the dashboard's listener on this page opens its own dialog
+        e.preventDefault();
+        openSearch();
+        return;
+      }
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || dashboard()) return;
+      var t = e.target;
+      if (/input|textarea|select/i.test((t && t.tagName) || "") || (t && t.isContentEditable)) return;
+      if ((document.getElementById("stars-dialog") || {}).open) return;
+      e.preventDefault();
+      openSearch();
+    });
+    if (dashboard() || !/^https?:$/.test(location.protocol) || !window.fetch) return;
+    // Served over http: show the button only when that server is qap's (it has the search module).
+    fetch("/ui/search.js", { method: "HEAD", cache: "no-store" }).then(function (res) {
+      if (!res.ok || document.getElementById("search-open")) return;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "topbtn";
+      b.id = "search-open";
+      b.title = "Search every project, family, subject and pass (" + (/Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘K" : "Ctrl+K") + " or /)";
+      b.setAttribute("aria-label", "Search");
+      b.innerHTML = SEARCH_SVG + '<span class="lbl">Search</span>';
+      b.addEventListener("click", openSearch);
+      var theme = document.getElementById("theme-toggle");
+      document.body.insertBefore(b, theme || document.body.firstChild);
+      placeTop();
+    }, function () {});
+  }
 
   // ---- the "View ★s" dialog: a reference list, never the full messages ----
   function buildDialog() {
@@ -526,6 +606,7 @@
       if (e.key === "qa-theme" && (e.newValue === "dark" || e.newValue === "light") && e.newValue !== root.dataset.theme) setTheme(e.newValue);
     });
 
+    setupSearch();
     spy(buildToc());
     countFolds();
     indexMessages();

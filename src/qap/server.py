@@ -6,12 +6,16 @@ localStorage per origin. Served from here, every pass of a subject (and the dash
   GET  /                  the dashboard (web/index.html)
   GET  /ui/<file>         the dashboard's modules, stylesheet, icons.json
   GET  /c/<path>          a file of the content root (pages, images); symlinks inside the root are followed
-  GET  /api/tree          the tree: folders, subjects, passes (qap.layout.tree)
-  POST /api/mkdir         {parent, title, icon?, color?, name?}  -> layout.make_folder
-  POST /api/mv            {src, dest}                            -> layout.move
-  POST /api/rename        {path, title}                          -> layout.set_meta
+  GET  /api/tree          the tree: projects, folders, subjects, passes (qap.layout.tree)
+  GET  /api/search        the search index: every project, folder, subject and pass (qap.search.build)
+  POST /api/mkdir         {parent, title, icon?, color?, name?}  -> layout.make_folder (parent "@id": a top-level
+                                                                    folder in that project)
+  POST /api/mv            {src, dest}                            -> layout.move (dest "@id": assign_project)
+  POST /api/rename        {path, title}                          -> layout.set_meta (path "@id": a project)
   POST /api/icon          {path, icon?, color?}                  -> layout.set_meta
-  POST /api/rmdir         {path}                                 -> layout.remove_folder (empty folders only)
+  POST /api/rmdir         {path}                                 -> layout.remove_folder (empty folders only;
+                                                                    "@id": remove_project, empty projects only)
+  POST /api/project       {title, icon?, color?, id?}            -> layout.make_project
 
 Writes are refused unless the request comes from this origin (Host and Origin checked, JSON body), so a web
 page elsewhere cannot drive them; the Host check also stops DNS-rebinding reads.
@@ -30,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from . import icons, layout as L
+from . import icons, layout as L, search
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8750
@@ -123,6 +127,11 @@ class Handler(BaseHTTPRequestHandler):
                                         "icons": sorted(icons.builtin())})
             except L.LayoutError as e:
                 return self._json(500, {"ok": False, "error": str(e)})
+        if path == "/api/search":
+            try:
+                return self._json(200, search.build(self.root))
+            except L.LayoutError as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         if path == "/favicon.ico":
             return self._file(WEB / "favicon.svg")
         return self._json(404, {"ok": False, "error": "not found"})
@@ -174,7 +183,9 @@ def _text(body: dict, key: str, required: bool = True) -> str | None:
 
 
 def act_mkdir(root: Path, body: dict) -> dict:
-    parent = L.clean_rel(_text(body, "parent", False) or "")
+    parent = (_text(body, "parent", False) or "").strip()
+    project = parent if parent.startswith("@") else None
+    parent = "" if project else L.clean_rel(parent)
     title = (_text(body, "title") or "").strip()
     if not title:
         raise ValueError("give the folder a title")
@@ -186,14 +197,17 @@ def act_mkdir(root: Path, body: dict) -> dict:
         rel = f"{parent}/{name}" if parent else name
         if not L.abs_path(root, rel).exists():
             break
-    node = L.make_folder(root, rel, title=title, icon=icon, parents=False)
+    node = L.make_folder(root, rel, title=title, icon=icon, parents=False, project=project)
     if color:
         L.set_meta(root, node["path"], color=color)
     return {"path": node["path"]}
 
 
 def act_mv(root: Path, body: dict) -> dict:
-    return L.move(root, _text(body, "src"), _text(body, "dest", False) or "")
+    dest = (_text(body, "dest", False) or "").strip()
+    if dest.startswith("@"):
+        return L.assign_project(root, _text(body, "src"), dest)
+    return L.move(root, _text(body, "src"), dest)
 
 
 def act_rename(root: Path, body: dict) -> dict:
@@ -212,10 +226,27 @@ def act_icon(root: Path, body: dict) -> dict:
 
 
 def act_rmdir(root: Path, body: dict) -> dict:
-    return L.remove_folder(root, _text(body, "path"))
+    path = _text(body, "path").strip()
+    if path.startswith("@"):
+        return L.remove_project(root, path)
+    return L.remove_folder(root, path)
 
 
-ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_icon, "rmdir": act_rmdir}
+def act_project(root: Path, body: dict) -> dict:
+    title = (_text(body, "title") or "").strip()
+    if not title:
+        raise ValueError("give the project a title")
+    icon = icons.validate(_text(body, "icon", False) or None)
+    color = icons.validate_color(_text(body, "color", False) or None)
+    base = L.project_id(_text(body, "id", False) or title)
+    taken = {p["id"] for p in L.read_projects(root)["projects"]}
+    pid = next(c for c in [base] + [f"{base}-{i}" for i in range(2, 50)] if c not in taken)
+    node = L.make_project(root, pid, title=title, icon=icon, color=color)
+    return {"path": node["path"], "id": node["id"]}
+
+
+ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_icon, "rmdir": act_rmdir,
+           "project": act_project}
 
 
 # ------------------------------------------------------------------ entry point

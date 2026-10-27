@@ -1,10 +1,12 @@
 // Tile icons: the built-in set (icons.json, shared with the CLI) or any emoji, and the tile colour.
 
 let builtin = {};
+let loading = null;
 
-export async function loadIcons() {
-  try { builtin = await (await fetch("/ui/icons.json")).json(); } catch (e) { builtin = {}; }
-  return builtin;
+// Fetched once per page (the dashboard at start, a pass page when its search first opens).
+export function loadIcons() {
+  loading ||= fetch("/ui/icons.json").then((r) => r.json()).catch(() => ({})).then((icons) => (builtin = icons));
+  return loading;
 }
 
 export function iconNames() { return Object.keys(builtin); }
@@ -27,7 +29,7 @@ export function colorOf(node) {
   return PALETTE[hash(name) % PALETTE.length];
 }
 
-export function defaultIcon(node) { return node.kind === "folder" ? "folder" : "doc"; }
+export function defaultIcon(node) { return { project: "layers", folder: "folder" }[node.kind] || "doc"; }
 
 // An element holding the icon: an inline SVG for a built-in name, the text itself for an emoji.
 export function glyph(icon, fallback = "doc") {

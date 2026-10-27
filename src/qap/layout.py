@@ -1,7 +1,9 @@
-"""The content tree: folders hold folders and subjects; a subject holds its passes.
+"""The content tree: projects group the top-level folders; folders hold folders and subjects; a subject holds
+its passes.
 
     <content_root>/
-      <folder>/                 any depth; optional folder.json {title, icon, order}
+      projects.json             optional {default, projects: [{id, title, icon, color}]}
+      <folder>/                 any depth; optional folder.json {title, icon, order, project}
         <subject>/              subject.json {title, icon, qa_project, sources, created}
           QA-PASS-1.src.html, QA-PASS-1.html, …, img/
 
@@ -9,11 +11,17 @@ A directory is a subject when it holds subject.json (or, without one, QA-PASS fi
 Every other visible directory is a folder. Paths in and out of this module are POSIX paths relative to the
 content root ("coach/v3/interaction"); "" is the root itself.
 
+Projects (work, personal, …) sit above the top-level folders (the "families"). A project is not a directory:
+it is an entry of projects.json, and a top-level folder or subject joins it with "project": "<id>" in its own
+manifest. One without that key belongs to the default project. Nothing moves on disk, so every path, link and
+symlink stays valid; a tree without projects.json reads exactly as before. A project is named "@<id>" wherever
+a path is expected ("@work"): '@' never starts a folder name, so the two cannot clash.
+
 folder.json "order" is either a number (this folder's rank among its siblings) or a list of child names
 (the order of this folder's children). Children not named in a list follow, folders first, then by title.
 
 Every mutation the CLI and the dashboard make goes through the functions below (make_folder, make_subject,
-move, set_meta, place), so both write the same manifests.
+move, set_meta, place, make_project, assign_project, remove_project), so both write the same manifests.
 """
 from __future__ import annotations
 
@@ -28,8 +36,10 @@ from . import passes as P
 
 SUBJECT_FILE = "subject.json"
 FOLDER_FILE = "folder.json"
+PROJECTS_FILE = "projects.json"
 RESERVED = {"img", "__pycache__", "node_modules"}
 SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ +-]{0,79}$")
+PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 
 
 class LayoutError(Exception):
@@ -161,9 +171,16 @@ def folder_node(root: Path, path: Path, with_titles: bool = True) -> dict:
 
 
 def tree(root: Path, with_titles: bool = True) -> dict:
+    """The root folder node. Its top-level children carry "project" (their project's id, "" for none) and the
+    root carries "projects", the project nodes in projects.json order ([] when the tree has no projects)."""
     if not root.is_dir():
         raise LayoutError(f"content root {root} does not exist (set it with `qap config content_root <path>`)")
-    return folder_node(root, root, with_titles)
+    node = folder_node(root, root, with_titles)
+    registry = read_projects(root)
+    for child in node["children"]:
+        child["project"] = _project_of(root, child, registry)
+    node["projects"] = [project_node(p, registry, node["children"]) for p in registry["projects"]]
+    return node
 
 
 def walk(node: dict):
@@ -182,8 +199,13 @@ def folders(root: Path) -> list[dict]:
 
 def resolve(root: Path, ref: str, kind: str | None = None) -> dict:
     """Find a subject or folder from what a user types: its path, or (when unique) its directory name,
-    its qa_project or its title, case-insensitive. kind: 'subject', 'folder' or None for either."""
+    its qa_project or its title, case-insensitive. kind: 'subject', 'folder' or None for either.
+    "@<id>" (or kind 'project' with an id or a title) finds a project."""
     ref = (ref or "").strip()
+    if ref.startswith("@") or kind == "project":
+        if kind not in (None, "project"):
+            raise LayoutError(f"{ref!r} is a project, not a {kind}")
+        return find_project(root, ref)
     nodes = [n for n in walk(tree(root, False)) if kind is None or n["kind"] == kind]
     wanted = ref.strip("/")
     for n in nodes:
@@ -218,8 +240,9 @@ def _require_folder(root: Path, rel: str) -> Path:
 
 
 def make_folder(root: Path, rel: str, title: str | None = None, icon: str | None = None,
-                parents: bool = True) -> dict:
-    """Create a folder (and its missing parents); writes folder.json when a title or icon is given."""
+                parents: bool = True, project: str | None = None) -> dict:
+    """Create a folder (and its missing parents); writes folder.json when a title or icon is given.
+    project ("@work" or "work"): the project the new path's top-level folder joins (see _check_top)."""
     rel = clean_rel(rel)
     if not rel:
         raise LayoutError("give the folder a name")
@@ -234,17 +257,21 @@ def make_folder(root: Path, rel: str, title: str | None = None, icon: str | None
                 raise LayoutError(f"{rel_path(root, p)} is a subject; a folder cannot go inside it")
     if path.exists():
         raise LayoutError(f"{rel} already exists")
+    claim = _check_top(root, rel, project)
     path.mkdir(parents=True)
     if title or icon:
         meta = {k: v for k, v in (("title", title), ("icon", icon)) if v}
         write_json(path / FOLDER_FILE, meta)
     _order_add(root, parent, path.name)
+    _claim_top(root, rel, claim)
     return folder_node(root, path, False)
 
 
 def make_subject(root: Path, rel: str, title: str | None = None, icon: str | None = None,
-                 qa_project: str | None = None, sources: list[str] | None = None) -> dict:
-    """Create a subject folder with its subject.json (parent folders are created as needed)."""
+                 qa_project: str | None = None, sources: list[str] | None = None,
+                 project: str | None = None) -> dict:
+    """Create a subject folder with its subject.json (parent folders are created as needed).
+    qa_project is the pages' stars key; project ("@work") is the project its top-level folder joins."""
     rel = clean_rel(rel)
     if not rel:
         raise LayoutError("give the subject a path, for example coach/v3/interaction")
@@ -256,6 +283,7 @@ def make_subject(root: Path, rel: str, title: str | None = None, icon: str | Non
         p = abs_path(root, "/".join(parts[:i]))
         if p.exists() and is_subject_dir(p):
             raise LayoutError(f"{rel_path(root, p)} is a subject; a subject cannot go inside it")
+    claim = _check_top(root, rel, project)
     existed = path.exists()
     (path / "img").mkdir(parents=True, exist_ok=True)
     write_json(path / SUBJECT_FILE, {
@@ -267,6 +295,7 @@ def make_subject(root: Path, rel: str, title: str | None = None, icon: str | Non
     })
     if not existed:
         _order_add(root, "/".join(parts[:-1]), path.name)
+    _claim_top(root, rel, claim)
     return subject_node(root, path, False)
 
 
@@ -293,7 +322,13 @@ def remove_folder(root: Path, rel: str) -> dict:
 
 def set_meta(root: Path, rel: str, **fields) -> dict:
     """Update a folder's or subject's manifest (title, icon, color, qa_project, order). None leaves a field as is;
-    '' clears it. The root folder's title and icon live in <root>/folder.json."""
+    '' clears it. The root folder's title and icon live in <root>/folder.json. "@<id>" changes a project
+    (title, icon, color)."""
+    if (rel or "").strip().startswith("@"):
+        bad = {k for k, v in fields.items() if v is not None} - {"title", "icon", "color"}
+        if bad:
+            raise LayoutError(f"cannot set {sorted(bad)} on a project")
+        return set_project_meta(root, rel.strip(), **{k: fields.get(k) for k in ("title", "icon", "color")})
     rel = clean_rel(rel)
     path = abs_path(root, rel)
     if not path.is_dir():
@@ -545,3 +580,205 @@ def _place_file(item: Path, subject_dir: Path, as_n: int | None, force: bool) ->
             target.write_text(re.sub(r'(<meta name="qa-pass" content=")\d+(")', rf"\g<1>{as_n}\2", text),
                               encoding="utf-8")
     return plan
+
+
+# ---------------------------------------------------------------------------- projects
+
+def read_projects(root: Path) -> dict:
+    """{default, projects: [{id, title, icon, color}]} from <root>/projects.json; no file means no projects.
+    Entries with a bad id are skipped; a default that names no project means none."""
+    data = read_json(root / PROJECTS_FILE)
+    out, seen = [], set()
+    for p in data.get("projects") or []:
+        pid = str(p.get("id") or "") if isinstance(p, dict) else ""
+        if PROJECT_ID.match(pid) and pid not in seen:
+            seen.add(pid)
+            out.append({"id": pid, "title": p.get("title") or pretty(pid), "icon": p.get("icon") or "",
+                        "color": p.get("color") or ""})
+    default = data.get("default") if data.get("default") in seen else None
+    return {"default": default, "projects": out}
+
+
+def _write_projects(root: Path, registry: dict) -> None:
+    write_json(root / PROJECTS_FILE, {"default": registry["default"],
+                                      "projects": [{k: v for k, v in p.items() if v} for p in registry["projects"]]})
+
+
+def _manifest(path: Path) -> Path:
+    return path / (SUBJECT_FILE if is_subject_dir(path) else FOLDER_FILE)
+
+
+def _project_of(root: Path, node: dict, registry: dict) -> str:
+    """The project of a top-level folder or subject: its own "project" key when it names a project, else the
+    default ('' when the tree has no projects)."""
+    if not registry["projects"]:
+        return ""
+    own = read_json(_manifest(abs_path(root, node["path"]))).get("project")
+    ids = {p["id"] for p in registry["projects"]}
+    return own if own in ids else (registry["default"] or "")
+
+
+def project_node(entry: dict, registry: dict, top: list[dict]) -> dict:
+    members = [c for c in top if c.get("project") == entry["id"]]
+    return {
+        "kind": "project",
+        "id": entry["id"],
+        "name": entry["id"],
+        "path": "@" + entry["id"],
+        "title": entry["title"],
+        "icon": entry["icon"],
+        "color": entry["color"],
+        "default": registry["default"] == entry["id"],
+        "members": [c["path"] for c in members],
+        "families": sum(1 for c in members if c["kind"] == "folder"),
+        "subjects": sum(c["subjects"] if c["kind"] == "folder" else 1 for c in members),
+        "updated": max((c["updated"] for c in members if c["updated"]), default=""),
+    }
+
+
+def projects(root: Path) -> list[dict]:
+    return tree(root, False)["projects"]
+
+
+def find_project(root: Path, ref: str) -> dict:
+    """A project from "@id", "id" or its title (case-insensitive)."""
+    want = (ref or "").strip().removeprefix("@").casefold()
+    nodes = projects(root)
+    if not nodes:
+        raise LayoutError("no project yet (create one with `qap project new <id>`)")
+    for field in ("id", "title"):
+        hits = [p for p in nodes if p[field].casefold() == want]
+        if len(hits) == 1:
+            return hits[0]
+    raise LayoutError(f"no project {ref!r}; projects: {', '.join('@' + p['id'] for p in nodes)}")
+
+
+def _pin_default(root: Path, registry: dict) -> None:
+    """Before the default project changes: write "project" into every top-level item that belongs to the old
+    default without saying so, so that it stays there. The default then only decides where new folders go."""
+    old = registry["default"]
+    if not old:
+        return
+    for child in folder_node(root, root, False)["children"]:
+        manifest = _manifest(abs_path(root, child["path"]))
+        meta = read_json(manifest)
+        if meta.get("project") not in {p["id"] for p in registry["projects"]}:
+            meta["project"] = old
+            if manifest.name == SUBJECT_FILE and "title" not in meta:
+                meta["title"] = pretty(child["name"])
+            write_json(manifest, meta)
+
+
+def project_id(text: str) -> str:
+    pid = re.sub(r"[^a-z0-9._-]+", "-", (text or "").strip().lower()).strip("-.")[:40]
+    if not PROJECT_ID.match(pid):
+        raise LayoutError(f"bad project id {text!r} (lower-case letters, digits, '.', '_', '-')")
+    return pid
+
+
+def make_project(root: Path, pid: str | None = None, title: str | None = None, icon: str | None = None,
+                 color: str | None = None, default: bool = False) -> dict:
+    """Add a project to projects.json. The first project becomes the default, so the folders already there (none
+    of which names a project) all land in it: creating "work" first is the whole migration of an existing tree."""
+    if not root.is_dir():
+        raise LayoutError(f"content root {root} does not exist")
+    pid = project_id(pid or title or "")
+    registry = read_projects(root)
+    if any(p["id"] == pid for p in registry["projects"]):
+        raise LayoutError(f"project @{pid} already exists")
+    registry["projects"].append({"id": pid, "title": title or pretty(pid), "icon": icon or "", "color": color or ""})
+    if default or not registry["default"]:
+        _pin_default(root, registry)
+        registry["default"] = pid
+    _write_projects(root, registry)
+    return find_project(root, "@" + pid)
+
+
+def set_project_meta(root: Path, ref: str, title: str | None = None, icon: str | None = None,
+                     color: str | None = None, default: bool | None = None) -> dict:
+    """Change a project's title, icon or colour (None leaves a field, '' clears icon or colour), or make it the
+    default."""
+    pid = find_project(root, ref)["id"]
+    registry = read_projects(root)
+    entry = next(p for p in registry["projects"] if p["id"] == pid)
+    if title is not None and title.strip():
+        entry["title"] = title.strip()
+    for key, value in (("icon", icon), ("color", color)):
+        if value is not None:
+            entry[key] = value
+    if default and registry["default"] != pid:
+        _pin_default(root, registry)
+        registry["default"] = pid
+    _write_projects(root, registry)
+    return find_project(root, "@" + pid)
+
+
+def assign_project(root: Path, rel: str, ref: str) -> dict:
+    """Put a folder or subject in a project. One below the top level moves to the top level first (qap.move:
+    symlinks re-pointed), since a project holds top-level items. Writes "project" in the item's manifest."""
+    target = find_project(root, ref)
+    rel = clean_rel(rel)
+    if not rel:
+        raise LayoutError("give the folder or subject to put in the project")
+    path = abs_path(root, rel)
+    if not path.is_dir():
+        raise LayoutError(f"{rel} does not exist")
+    registry = read_projects(root)
+    moved = None
+    if "/" in rel:
+        moved = move(root, rel, "")
+        came_from = rel.rsplit("/", 1)[0]
+        rel, path = moved["path"], abs_path(root, moved["path"])
+    manifest = _manifest(path)
+    meta = read_json(manifest)
+    before = _project_of(root, {"path": rel}, registry)
+    if not moved:
+        came_from = "@" + before if before else ""
+        if meta.get("project") == target["id"]:
+            raise LayoutError(f"{rel} is already in {target['title']}")
+    meta["project"] = target["id"]
+    if manifest.name == SUBJECT_FILE and "title" not in meta:
+        meta["title"] = pretty(path.name)
+    write_json(manifest, meta)
+    return {"from": came_from, "path": rel, "project": target["id"], "relinked": moved["relinked"] if moved else []}
+
+
+def remove_project(root: Path, ref: str) -> dict:
+    """Delete an empty project from projects.json (its folders are never touched: move them out first)."""
+    node = find_project(root, ref)
+    if node["members"]:
+        raise LayoutError(f"{node['title']} still holds {', '.join(node['members'][:5])}; move them to another "
+                          f"project first (`qap project move <folder> <project>`)")
+    registry = read_projects(root)
+    registry["projects"] = [p for p in registry["projects"] if p["id"] != node["id"]]
+    if registry["default"] == node["id"]:
+        registry["default"] = registry["projects"][0]["id"] if registry["projects"] else None
+    _write_projects(root, registry)
+    return {"path": node["path"]}
+
+
+def _check_top(root: Path, rel: str, ref: str | None) -> str | None:
+    """Before make_folder / make_subject with a project: the id the new top-level item will join, or None
+    (no project asked, or the top-level folder exists already and is in that project: nothing to write).
+    An existing top-level folder in another project is refused, before anything is created."""
+    if not ref:
+        return None
+    pid = find_project(root, ref)["id"]
+    top = rel.split("/")[0]
+    if not abs_path(root, top).exists():
+        return pid
+    have = _project_of(root, {"path": top}, read_projects(root))
+    if have != pid:
+        raise LayoutError(f"{top} is in project @{have or '-'}, not @{pid} "
+                          f"(move it first: `qap project move {top} {pid}`)")
+    return None
+
+
+def _claim_top(root: Path, rel: str, pid: str | None) -> None:
+    """After the create: the new top-level item joins the project _check_top returned."""
+    if not pid:
+        return
+    manifest = _manifest(abs_path(root, rel.split("/")[0]))
+    meta = read_json(manifest)
+    meta["project"] = pid
+    write_json(manifest, meta)
