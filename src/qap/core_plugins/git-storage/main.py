@@ -91,12 +91,18 @@ class GitStorage(Plugin):
             raise PluginError(str(e))
 
     def cmd_status(self, opts) -> dict:
-        info = self.store(opts.interactive).status(fetch=opts.fetch)
+        try:
+            info = self.store(opts.interactive).status(fetch=opts.fetch)
+        except GitError as e:
+            raise PluginError(str(e))
         info["auto"] = self.auto()
         return info
 
     def cmd_log(self, opts) -> dict:
-        commits = self.store().log(opts.n)
+        try:
+            commits = self.store().log(opts.n)
+        except GitError as e:
+            raise PluginError(str(e))
         text = "\n".join(f"{c['sha']}  {c['date'][:16].replace('T', ' ')}  {c['subject']}" for c in commits)
         return {"commits": commits, "text": text or "no commit yet"}
 

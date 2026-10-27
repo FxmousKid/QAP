@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -11,6 +12,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -63,6 +65,15 @@ class CLI(unittest.TestCase):
         code, out = self.q("where")  # no subject, not a TTY: a clear error instead of a prompt
         self.assertEqual(code, 1)
         self.assertIn("give a subject", out["error"])
+
+    def test_an_unreadable_config_is_reported(self):
+        cfg = Path(self.tmp.name) / "cfg"
+        (cfg / "qap").mkdir(parents=True)
+        (cfg / "qap" / "config.json").write_text("{not json", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(cfg)}):
+            code, out = run("config", "--json")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot read", out["error"])
 
     def test_config_reports_root(self):
         code, out = self.q("config")

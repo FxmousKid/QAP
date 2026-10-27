@@ -18,7 +18,8 @@ What a plugin can register (all removed on unload):
   add_settings(Setting(...), ...)                                                its settings tab (CLI + dashboard)
 
 Settings and other per-machine data live in ~/.config/qap/plugins/<id>/data.json; the enabled list in
-~/.config/qap/plugins.json. Nothing of a plugin lives in the content root: pulled content never runs code.
+~/.config/qap/plugins.json. Nothing of a plugin lives in the content root, and only a terminal turns a community
+plugin on: content pulled from a remote never installs or switches on plugin code.
 """
 from __future__ import annotations
 
@@ -94,6 +95,21 @@ class Manifest:
 
 def version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split("."))
+
+
+def check_args(name: str, args: list) -> None:
+    """Declare a command's args on a parser that already has qap's own options (-h, --root, --json, --yes/-y),
+    so a clash or a bad argparse keyword is caught when the plugin loads."""
+    p = argparse.ArgumentParser(prog=name)
+    p.add_argument("--root")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--yes", "-y", action="store_true")
+    for item in args:
+        try:
+            flags, kw = item
+            p.add_argument(*flags, **kw)
+        except (argparse.ArgumentError, TypeError, ValueError) as e:
+            raise PluginError(f"{name}: bad argument {item!r}: {e}")
 
 
 # ---------------------------------------------------------------------------- what plugins register
@@ -200,6 +216,7 @@ class Plugin:
             raise PluginError(f"{self.manifest.id}: command id {id!r} must be lowercase letters, digits, hyphens")
         words = tuple(cli.split()) if isinstance(cli, str) else tuple(cli or (self.manifest.id, id))
         args = list(args or [])
+        check_args(f"{self.manifest.id}:{id}", args)  # a bad declaration fails this plugin's load, not qap
         if needs_input is None:
             needs_input = any(not flags[0].startswith("-") or kw.get("required") for flags, kw in args)
         cmd = Command(self.manifest.id, id, name, callback, words, args, dashboard, needs_input)
@@ -253,7 +270,13 @@ class Plugin:
 
         thread = threading.Thread(target=loop, name=f"qap-plugin-{self.manifest.id}", daemon=True)
         thread.start()
-        self.register(stop.set)
+
+        def undo() -> None:  # let a run in progress (a git sync) finish, within reason
+            stop.set()
+            if thread is not threading.current_thread():
+                thread.join(timeout=30)
+
+        self.register(undo)
 
     def add_settings(self, *settings: Setting) -> None:
         for s in settings:

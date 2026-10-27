@@ -5,6 +5,7 @@ A plugin command's words come from its add_command(cli=…). Words shared by sev
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 
@@ -60,9 +61,20 @@ def add_parsers(sub, common, app: plugins.App) -> None:
             continue
         leaf = parent.add_parser(cmd.cli[-1], parents=[common], help=cmd.name,
                                  description=f"{cmd.name} (plugin {cmd.plugin})")
-        for flags, kw in cmd.args:
-            leaf.add_argument(*flags, **kw)
+        try:  # checked when the plugin loaded (plugins.check_args); never let one command break every other
+            for flags, kw in cmd.args:
+                leaf.add_argument(*flags, **kw)
+        except (argparse.ArgumentError, TypeError, ValueError) as e:
+            app.log(f"plugin {cmd.plugin}: command {cmd.id} has a bad argument ({e}); it will refuse to run")
+            leaf.set_defaults(fn=_broken(f"{cmd.full_id} is broken: {e}"))
+            continue
         leaf.set_defaults(fn=run_command, plugin_command=cmd.full_id)
+
+
+def _broken(message: str):
+    def fn(args) -> None:
+        raise plugins.PluginError(message)
+    return fn
 
 
 def _print(args, ok: bool, data: dict, text: str) -> None:

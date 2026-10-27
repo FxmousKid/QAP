@@ -9,13 +9,18 @@ push. Three rules hold everywhere:
     Background syncs run without a terminal, so a passphrase prompt fails instead of hanging.
 
 GIT_CEILING_DIRECTORIES pins every git call to the content root itself, so a content root that sits inside
-another repository (~/Desktop/Dev/ai/QAP/contents inside ~/Desktop/Dev/ai) never touches that repository.
+another repository (~/Desktop/Dev/ai/QAP/contents inside ~/Desktop/Dev/ai) never touches that repository; the
+variables a git hook exports (GIT_DIR, GIT_INDEX_FILE, …) are dropped for the same reason. Your global git
+config still applies (identity, signing, credentials), except what would make an unattended sync misbehave:
+global excludes (the .gitignore decides what is backed up), hooks, merge.ff=only and auto-stash.
 """
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
+import signal
 import socket
 import subprocess
 import time
@@ -61,6 +66,23 @@ def now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+# Config qap pins on its own git calls (see the module docstring).
+PINNED = ["-c", "core.quotepath=false", "-c", "core.excludesFile=", "-c", "core.hooksPath=/dev/null",
+          "-c", "merge.autoStash=false", "-c", "rebase.autoStash=false"]
+
+
+@functools.lru_cache(maxsize=1)
+def repo_env_vars() -> frozenset[str]:
+    """The variables that point git at a repository (what a hook exports), plus the dates a hook pins."""
+    try:
+        listed = subprocess.run(["git", "rev-parse", "--local-env-vars"], capture_output=True, text=True,
+                                timeout=10).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        listed = []
+    return frozenset(listed) | {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                                "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"}
+
+
 class Store:
     def __init__(self, root: Path, settings: dict | None = None, interactive: bool = False, timeout: int = 90):
         self.root = Path(root).expanduser().resolve()
@@ -71,27 +93,53 @@ class Store:
     # ------------------------------------------------------------------ running git
     def git(self, *args: str, check: bool = True, network: bool = False, sign: bool = False,
             cwd: Path | None = None, ceiling: bool = True) -> subprocess.CompletedProcess:
-        pre = ["-c", "core.quotepath=false"]
+        pre = list(PINNED)
         if sign and self.settings.get("sign_commits") == "off":
             pre += ["-c", "commit.gpgsign=false"]
-        env = dict(os.environ)
+        env = {k: v for k, v in os.environ.items() if k not in repo_env_vars()}
+        env["GIT_OPTIONAL_LOCKS"] = "0"     # a status poll never holds index.lock against a sync
+        env["GIT_LITERAL_PATHSPECS"] = "1"  # file names are names, never patterns
         if ceiling:
             env["GIT_CEILING_DIRECTORIES"] = str(self.root.parent)
         if not self.interactive:
             env["GIT_TERMINAL_PROMPT"] = "0"
         timeout = self.timeout if network else 120
         try:
-            proc = subprocess.run(["git", *pre, *args], cwd=cwd or self.root, capture_output=True, text=True,
-                                  env=env, timeout=timeout, start_new_session=not self.interactive,
-                                  stdin=None if self.interactive else subprocess.DEVNULL)
+            child = subprocess.Popen(["git", *pre, *args], cwd=cwd or self.root, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True, env=env, start_new_session=not self.interactive,
+                                     stdin=None if self.interactive else subprocess.DEVNULL)
         except FileNotFoundError:
             raise GitError("git is not installed (or not on PATH)")
+        try:
+            stdout, stderr = child.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            self._kill(child)
             raise GitError(f"git {args[0]} gave no answer in {timeout} s"
-                           + (" (network down, or a credential prompt with no terminal?)" if network else ""))
+                           + (" (network down, or a credential prompt with no terminal?)" if network else
+                              " (a signing prompt? `qap plugins config git-storage sign_commits off`)"))
+        except BaseException:  # Ctrl+C: stop git and what it started (gpg, ssh) before going on
+            self._kill(child)
+            raise
+        proc = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
         if check and proc.returncode:
             raise GitError(f"git {' '.join(args[:2])} failed: {(proc.stderr or proc.stdout).strip()}")
         return proc
+
+    def _kill(self, child: subprocess.Popen) -> None:
+        """git and its children (gpg, pinentry, ssh): the whole process group when git has its own session."""
+        for sig, wait in ((signal.SIGTERM, 5), (signal.SIGKILL, 5)):
+            try:
+                if not self.interactive:
+                    os.killpg(child.pid, sig)
+                else:
+                    child.send_signal(sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                child.communicate(timeout=wait)
+                return
+            except subprocess.TimeoutExpired:
+                continue
 
     def out(self, *args: str, **kw) -> str:
         return self.git(*args, **kw).stdout.strip()
@@ -287,21 +335,39 @@ class Store:
         unrelated = unrelated or not self.related(ref)
         if self.settings.get("sync_method") == "rebase" and ahead and not unrelated:
             args = ["rebase", "--quiet", ref]
-        else:
-            args = ["merge", "--quiet", "--no-edit", ref] + (["--allow-unrelated-histories"] if unrelated else [])
-        proc = self.git(*args, check=False, sign=True)
-        if proc.returncode:
-            files = self.unmerged()
-            state = self.in_progress()
-            if state == "rebase":
-                self.git("rebase", "--abort", check=False)
-            elif state == "merge":
-                self.git("merge", "--abort", check=False)
-            detail = (proc.stderr or proc.stdout).strip()
-            if files:
-                raise Conflict(files, ref, detail)
-            raise GitError(f"git {args[0]} {ref} failed (nothing changed): {detail}")
+        else:  # --ff: a merge.ff=only in your git config must not stop a sync that needs a merge commit
+            args = ["merge", "--quiet", "--no-edit", "--ff", ref] + (["--allow-unrelated-histories"] if unrelated else [])
+        with self.integrating(args[0]):
+            proc = self.git(*args, check=False, sign=True)
+            if proc.returncode:
+                files = self.unmerged()
+                self.abort_in_progress()
+                detail = (proc.stderr or proc.stdout).strip()
+                if files:
+                    raise Conflict(files, ref, detail)
+                raise GitError(f"git {args[0]} {ref} failed (nothing changed): {detail}")
         return behind
+
+    @contextlib.contextmanager
+    def integrating(self, op: str):
+        """Around a merge or rebase: any failure (a timeout, Ctrl+C) undoes it, and a marker in the state file
+        lets the next run undo one that a killed process left half done."""
+        self.save_state(integrating={"at": now(), "op": op, "pid": os.getpid()})
+        try:
+            yield
+        except BaseException:
+            self.abort_in_progress()
+            raise
+        finally:
+            state = self.state()
+            state.pop("integrating", None)
+            self._write_state(state)
+
+    def abort_in_progress(self) -> str | None:
+        state = self.in_progress()
+        if state in ("merge", "rebase"):
+            self.git(state, "--abort", check=False)
+        return state
 
     def push(self) -> int:
         """Push this branch to the remote: never forced. Returns how many commits went out."""
@@ -326,7 +392,15 @@ class Store:
             raise GitError(f"{self.root} is not backed up with git yet: qap storage git init --remote <url>")
 
     def require_clean(self) -> None:
-        """No half-done merge or rebase (checked under the lock: another sync may be mid-merge)."""
+        """No half-done merge or rebase (checked under the lock: another sync may be mid-merge). One that qap
+        itself left (the process was killed mid-merge) is undone here; anyone else's is left alone."""
+        marker = self.state().get("integrating")
+        if marker:
+            if self.in_progress():
+                self.abort_in_progress()
+            state = self.state()
+            state.pop("integrating", None)
+            self._write_state(state)
         state = self.in_progress()
         if state:
             raise GitError(f"a {state} is in progress in {self.root}: finish it (or `git {state} --abort`) "
@@ -396,16 +470,21 @@ class Store:
                     "text": f"git sync paused: conflict with {conflict['ref']} on {', '.join(conflict['files'][:3])} "
                             f"(qap storage git status)"}
         with self.locked(wait=60 if trigger == "manual" else 20):
+            conflict = self.state().get("conflict")  # again: a sync that held the lock may have recorded one
+            if conflict and trigger != "manual":
+                return {"ok": False, "skipped": "conflict", "conflict": conflict,
+                        "text": f"git sync paused: conflict with {conflict['ref']} (qap storage git status)"}
             self.require_clean()
             return self._sync(trigger, message, push)
 
     def _sync(self, trigger: str, message: str | None, push: bool | None, unrelated: bool = False) -> dict:
         push = self.settings.get("push", True) if push is None else push
-        committed = self.commit(trigger, message)
-        out = {"ok": True, "trigger": trigger, "committed": committed, "pulled": 0, "pushed": 0}
-        words = [f"committed {committed['files']} file(s) as {committed['sha']}"] if committed else []
+        out = {"ok": True, "trigger": trigger, "committed": None, "pulled": 0, "pushed": 0}
+        committed, words = None, []
         ref = self.remote_ref()
         try:
+            committed = out["committed"] = self.commit(trigger, message)
+            words = [f"committed {committed['files']} file(s) as {committed['sha']}"] if committed else []
             self.fetch()
             out["pulled"] = self.integrate(ref, unrelated)
             if push:
@@ -473,23 +552,25 @@ class Store:
             ref = self.remote_ref()
             if not self.has_ref(ref):
                 raise GitError(f"{ref} does not exist: nothing to resolve against")
-            proc = self.git("merge", "--quiet", "--no-edit", ref,
-                            *([] if self.related(ref) else ["--allow-unrelated-histories"]), check=False, sign=True)
-            files = self.unmerged() if proc.returncode else []
-            if proc.returncode and not files:
-                self.git("merge", "--abort", check=False)
-                raise GitError(f"git merge {ref} failed: {(proc.stderr or proc.stdout).strip()}")
             other = self.short(ref if keep == "mine" else "HEAD")
-            for f in files:
-                side = "--ours" if keep == "mine" else "--theirs"
-                if self.git("checkout", side, "--", f, check=False).returncode:
-                    self.git("rm", "--quiet", "--", f)  # that side deleted it
-                else:
-                    self.git("add", "--", f)
-            if files:
-                self.git("commit", "--quiet", "-m",
-                         f"qap resolve: kept {'this machine' if keep == 'mine' else 'the remote'}'s version of "
-                         f"{len(files)} file(s)", "-m", "\n".join(files), sign=True)
+            with self.integrating("merge"):  # any failure below undoes the merge: no markers left behind
+                proc = self.git("merge", "--quiet", "--no-edit", "--ff", ref,
+                                *([] if self.related(ref) else ["--allow-unrelated-histories"]), check=False, sign=True)
+                files = self.unmerged() if proc.returncode else []
+                if proc.returncode and not files:
+                    raise GitError(f"git merge {ref} failed: {(proc.stderr or proc.stdout).strip()}")
+                stage = "2" if keep == "mine" else "3"  # in the index: stage 2 is this machine's side, 3 the remote's
+                for f in files:
+                    stages = {line.split("\t")[0].split()[2] for line in self.out("ls-files", "-u", "--", f).splitlines()}
+                    if stage in stages:
+                        self.git("checkout", "--ours" if keep == "mine" else "--theirs", "--", f)
+                        self.git("add", "--", f)
+                    else:  # the kept side deleted it
+                        self.git("rm", "--quiet", "--", f)
+                if files:
+                    self.git("commit", "--quiet", "-m",
+                             f"qap resolve: kept {'this machine' if keep == 'mine' else 'the remote'}'s version of "
+                             f"{len(files)} file(s)", "-m", "\n".join(files), sign=True)
             pushed = self.push() if self.settings.get("push", True) else 0
             state = self.state()
             state.pop("conflict", None)
@@ -533,7 +614,8 @@ class Store:
         ref = self.remote_ref()
         if fetch and info["initialized"]:
             try:
-                self.fetch()
+                with self.locked(wait=5):
+                    self.fetch()
             except GitError as e:
                 info["warnings"].append(f"fetch failed: {e}")
         ahead, behind = self.counts(ref) if self.has_ref(ref) else (None, None)
@@ -551,8 +633,10 @@ class Store:
 
     def warnings(self) -> list[str]:
         out = []
-        outside, big = [], []
+        outside, big, nested = [], [], []
         for dirpath, dirnames, filenames in os.walk(self.root):
+            if dirpath != str(self.root) and (".git" in dirnames or ".git" in filenames):
+                nested.append(Path(dirpath).relative_to(self.root).as_posix())
             dirnames[:] = [d for d in dirnames if d != ".git"]
             for name in filenames + [d for d in dirnames if os.path.islink(os.path.join(dirpath, d))]:
                 p = Path(dirpath) / name
@@ -565,6 +649,9 @@ class Store:
         if outside:
             out.append(f"{len(outside)} symlink(s) point outside the content root; git keeps the link, not the "
                        f"file: {', '.join(outside[:3])}")
+        if nested:
+            out.append(f"{len(nested)} folder(s) are git repositories of their own; git keeps a pointer to them, "
+                       f"not their files: {', '.join(nested[:3])}")
         if big:
             out.append(f"{len(big)} file(s) over 50 MB (GitHub refuses 100 MB): {', '.join(big[:3])}")
         if not self.out("config", "user.email", check=False):

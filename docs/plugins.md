@@ -21,12 +21,15 @@ The smallest complete example is [`examples/plugins/build-log`](../examples/plug
   content must never run code.
 - A plugin runs Python with your permissions, like an Obsidian community plugin runs JavaScript. Read a plugin
   before you turn it on.
+- A community plugin is turned on from a terminal only. The pass pages are served from the dashboard's origin,
+  and a pass can come from someone else's machine through the git backup. Such a page could press the
+  dashboard's switch, so the switch can turn a community plugin off but never on.
 
 ```bash
 qap plugins                              # every plugin, on or off, and the commands it adds
 qap plugins install ./my-plugin          # copy a folder (--link: symlink it, for development)
 qap plugins install https://github.com/you/qap-my-plugin.git
-qap plugins enable my-plugin             # or the switch on the dashboard's Plugins page (⧉ menu → Plugins…)
+qap plugins enable my-plugin             # the dashboard's Plugins page (⧉ → Plugins…) can only turn it off
 qap plugins config my-plugin             # its settings; `qap plugins config my-plugin key value` sets one
 qap plugins disable my-plugin
 qap plugins remove my-plugin             # community plugins only; a core plugin is disabled instead

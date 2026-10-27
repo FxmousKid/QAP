@@ -508,7 +508,14 @@ def main(argv: list[str] | None = None) -> int:
         print("cancelled", file=sys.stderr)
         return 130
     except SystemExit as e:  # a command that printed its output and failed (build, a plugin command)
-        return e.code if isinstance(e.code, int) else 1
+        if isinstance(e.code, int):
+            return e.code
+        message = str(e.code or "failed")  # SystemExit("qap: cannot read …"): say it
+        if args.json:
+            print(json.dumps({"ok": False, "error": message.removeprefix("qap: ")}, ensure_ascii=False))
+        else:
+            print(message, file=sys.stderr)
+        return 1
     except (Fail, L.LayoutError, plugins.PluginError, ValueError, LookupError, FileNotFoundError, OSError) as e:
         if args.json:
             print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))

@@ -200,6 +200,67 @@ class GitStorage(unittest.TestCase):
         self.assertEqual(self.q(self.a, "storage", "git", "sync")[0], 0)  # and the first machine follows
         self.assertIn("b's own", (self.a / "work/billing/QA-PASS-1.src.html").read_text())
 
+    def diverge(self, page="work/billing/QA-PASS-1.src.html", a_text="from a", b_text="from b") -> Path:
+        """Machines a and b both set up; then both change `page` (None deletes it on a); a syncs first."""
+        self.q(self.a, "storage", "git", "init", "--remote", self.url)
+        b = self.machine("b", with_subject=False)
+        self.q(b, "storage", "git", "init", "--remote", self.url)
+        if a_text is None:
+            (self.a / page).unlink()
+        else:
+            (self.a / page).write_text(SOURCE.format(n=1, text=a_text), encoding="utf-8")
+        (b / page).write_text(SOURCE.format(n=1, text=b_text), encoding="utf-8")
+        self.assertEqual(self.q(self.a, "storage", "git", "sync")[0], 0)
+        return b
+
+    def test_a_merge_left_half_done_by_qap_is_undone_and_anyone_elses_is_left_alone(self):
+        b = self.diverge()
+        page = b / "work/billing/QA-PASS-1.src.html"
+        self.q(b, "storage", "git", "commit")
+        git(b, "fetch", "--quiet")
+        subprocess.run(["git", "merge", "origin/main"], cwd=b, capture_output=True)  # conflict markers now
+        self.assertIn("<<<<<<<", page.read_text())
+        code, out = self.q(b, "storage", "git", "sync")  # a hand merge in progress: not ours, refused
+        self.assertEqual(code, 1)
+        self.assertIn("merge is in progress", out["error"])
+        self.assertIn("<<<<<<<", page.read_text())
+        state = b / ".git" / "qap-storage.json"
+        data = json.loads(state.read_text())
+        data["integrating"] = {"at": "then", "op": "merge", "pid": 1}  # as if qap was killed mid-merge
+        state.write_text(json.dumps(data))
+        code, out = self.q(b, "storage", "git", "sync")
+        self.assertEqual(code, 1)
+        self.assertEqual(out["conflict"]["files"], ["work/billing/QA-PASS-1.src.html"])
+        self.assertNotIn("<<<<<<<", page.read_text())
+        self.assertFalse((b / ".git/MERGE_HEAD").exists())
+
+    def test_keeping_the_side_that_deleted_a_file(self):
+        b = self.diverge(a_text=None)  # a deleted the page, b changed it
+        page = "work/billing/QA-PASS-1.src.html"
+        self.assertEqual(self.q(b, "storage", "git", "sync")[0], 1)
+        code, out = self.q(b, "storage", "git", "resolve", "--theirs")
+        self.assertEqual(code, 0, out)
+        self.assertFalse((b / page).exists())
+        self.assertNotIn(page, git(self.remote, "ls-tree", "-r", "--name-only", "main"))
+
+    def test_hook_variables_and_unfriendly_git_config_do_not_leak_in(self):
+        self.q(self.a, "storage", "git", "init", "--remote", self.url)
+        b = self.machine("b", with_subject=False)
+        self.q(b, "storage", "git", "init", "--remote", self.url)
+        (self.a / "work/billing/a.md").write_text("a\n", encoding="utf-8")
+        self.q(self.a, "storage", "git", "sync")
+        gitconfig = Path(os.environ["GIT_CONFIG_GLOBAL"])  # merge.ff=only and a global ignore of *.mp4
+        gitconfig.write_text(gitconfig.read_text() + f"[merge]\n\tff = only\n[core]\n\texcludesFile = "
+                             f"{self.base / 'global-ignore'}\n", encoding="utf-8")
+        (self.base / "global-ignore").write_text("*.mp4\n", encoding="utf-8")
+        (b / "work/billing/demo.mp4").write_bytes(b"video")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.base / "nowhere"),  # what a git hook exports
+                                          "GIT_INDEX_FILE": str(self.base / "nowhere-index")}):
+            code, out = self.q(b, "storage", "git", "sync")
+        self.assertEqual(code, 0, out)
+        self.assertEqual((out["pulled"], out["pushed"]), (1, 2))  # a real merge despite merge.ff=only
+        self.assertIn("work/billing/demo.mp4", git(self.remote, "ls-tree", "-r", "--name-only", "main"))
+
     # ------------------------------------------------------------------ edges
     def test_a_content_root_inside_another_repository(self):
         parent = self.base / "parent"

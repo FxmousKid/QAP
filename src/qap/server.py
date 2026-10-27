@@ -191,6 +191,11 @@ class Handler(BaseHTTPRequestHandler):
         app = self.app
         try:
             if method == "POST" and rest in ("enable", "disable"):
+                found = app.found().get(pid)
+                if rest == "enable" and found and not found.core and not app.is_enabled(pid, found):
+                    # a page served from /c/ shares this origin: it must not be able to switch on code
+                    return self._json(403, {"ok": False, "error": f"turn a community plugin on from a terminal: "
+                                                                  f"qap plugins enable {pid}"})
                 app.enable(pid) if rest == "enable" else app.disable(pid)
                 return self._json(200, {"ok": True, "plugins": app.describe()})
             if method == "POST" and rest == "settings":

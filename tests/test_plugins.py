@@ -168,6 +168,17 @@ class Lifecycle(Base):
         code, out = self.q("mkdir", "archive", "--title", "Archive")  # qap itself still works
         self.assertEqual((code, out["folder"]), (0, "archive"))
 
+    def test_a_bad_argument_declaration_fails_the_plugin_not_qap(self):
+        make_plugin(self.config / "plugins", "clash", body="from qap.plugins import Plugin\n"
+                    "class Clash(Plugin):\n    def onload(self):\n"
+                    "        self.add_command('go', 'Go', lambda o: {}, args=[(['-y'], {})])\n")
+        app = self.app()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(app.enable("clash"))
+        self.assertIn("conflicting option", app.errors["clash"])
+        code, out = self.q("plugins", "disable", "clash")  # the CLI still works, so it can be turned off
+        self.assertEqual(code, 0, out)
+
     def test_settings_are_typed_and_saved_per_plugin(self):
         app = self.app()
         plugin = app.enable("counter")
@@ -275,8 +286,14 @@ class ServerRoutes(Base):
         self.assertEqual(code, 200)
         self.assertEqual(self.req("/api/plugins/counter/hello")[0], 404)
         self.assertEqual(self.req("/plugins/counter/web/main.js")[0], 404)
-        self.req("/api/plugins/counter/enable", {})
-        self.assertEqual(self.req("/api/plugins/counter/hello")[0], 200)
+        # a page served from /c/ shares the origin: switching a community plugin ON takes a terminal
+        code, out = self.req("/api/plugins/counter/enable", {})
+        self.assertEqual(code, 403)
+        self.assertIn("qap plugins enable counter", out["error"])
+        self.assertEqual(self.req("/api/plugins/counter/hello")[0], 404)
+        self.assertEqual(self.req("/api/plugins/git-storage/disable", {})[0], 200)  # core ones: both ways
+        self.assertEqual(self.req("/api/plugins/git-storage/enable", {})[0], 200)
+        self.assertIn("git-storage", self.application.plugins)
 
     def test_dashboard_writes_fire_content_changed(self):
         heard = []

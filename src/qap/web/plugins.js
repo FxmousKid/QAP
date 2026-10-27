@@ -73,19 +73,20 @@ function apiFor(info, cleanups) {
 
 async function loadOne(info) {
   if (loaded.has(info.id) || !info.loaded || !info.web?.main) return;
-  const cleanups = [];
+  const entry = { module: null, cleanups: [] };
+  loaded.set(info.id, entry); // taken before the first await: a second sync() never loads it twice
   if (info.web.style) {
     const link = el("link", { rel: "stylesheet", href: info.web.style, "data-plugin": info.id });
     document.head.append(link);
-    cleanups.push(() => link.remove());
+    entry.cleanups.push(() => link.remove());
   }
   try {
-    const module = await import(info.web.main);
-    loaded.set(info.id, { module, cleanups });
-    await module.onload?.(apiFor(info, cleanups));
+    entry.module = await import(info.web.main);
+    await entry.module.onload?.(apiFor(info, entry.cleanups));
   } catch (e) {
     console.error(`plugin ${info.id}:`, e);
     toast(`Plugin ${info.name}: ${e.message}`, { error: true });
+    unloadOne(info.id); // what it managed to add goes, its stylesheet too
   }
 }
 
@@ -93,7 +94,7 @@ function unloadOne(id) {
   const entry = loaded.get(id);
   if (!entry) return;
   loaded.delete(id);
-  try { entry.module.onunload?.(); } catch (e) { console.error(e); }
+  try { entry.module?.onunload?.(); } catch (e) { console.error(e); }
   for (const fn of entry.cleanups.reverse()) { try { fn(); } catch (e) { console.error(e); } }
 }
 
@@ -160,7 +161,7 @@ async function renderPluginsPage(view) {
     el("h1", { text: "Plugins" }),
     el("p", { class: "lede" }, "Core plugins ship with qap and are on unless you turn them off. Community plugins live in ",
       el("code", { text: "~/.config/qap/plugins" }), " (", el("code", { text: "qap plugins install <folder | git URL>" }),
-      ") and stay off until you turn them on: a plugin runs code with your permissions."));
+      ") and stay off until you turn them on from a terminal: a plugin runs code with your permissions."));
   view.replaceChildren(page);
   const data = await request("/api/plugins");
   if (!data.ok) { page.append(el("p", { class: "empty", text: data.error })); return; }
@@ -176,7 +177,9 @@ async function renderPluginsPage(view) {
 function card(info) {
   const toggle = el("input", { type: "checkbox", role: "switch", "aria-label": `Turn ${info.name || info.id} on or off` });
   toggle.checked = info.loaded;
-  toggle.disabled = !info.name || info.compatible === false;
+  // Switching a community plugin ON takes a terminal: a page served from /c/ shares this origin.
+  const terminalOnly = !info.core && !info.enabled;
+  toggle.disabled = !info.name || info.compatible === false || terminalOnly;
   toggle.addEventListener("change", async () => {
     const r = await request(`/api/plugins/${info.id}/${toggle.checked ? "enable" : "disable"}`, {});
     if (!r.ok) { toast(r.error, { error: true }); toggle.checked = !toggle.checked; return; }
@@ -191,6 +194,8 @@ function card(info) {
         info.author ? el("p", { class: "by", text: `by ${info.author}` }) : null),
       el("label", { class: "switch" }, toggle, el("span", { "aria-hidden": "true" }))));
   if (info.error) box.append(el("p", { class: "err", text: info.error }));
+  if (terminalOnly && info.name) box.append(el("p", { class: "by" }, "Turn it on from a terminal: ",
+    el("code", { text: `qap plugins enable ${info.id}` })));
   if (info.loaded && info.settings?.length) box.append(el("h4", { text: "Settings" }), settingsForm(info));
   if (info.loaded && info.commands?.length) {
     const list = el("ul", { class: "plugin-commands" });
