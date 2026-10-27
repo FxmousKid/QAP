@@ -1,0 +1,10 @@
+{
+  "id": "build-log",
+  "name": "Build log",
+  "version": "0.1.0",
+  "minAppVersion": "0.1.0",
+  "description": "The example plugin: records every qap build and every change to the content, and shows them in the CLI and the dashboard.",
+  "author": "QAP examples",
+  "main": "main.py",
+  "web": {"main": "web/main.js"}
+}

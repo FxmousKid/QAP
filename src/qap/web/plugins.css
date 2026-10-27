@@ -1,0 +1,49 @@
+/* Plugins: the top-bar items, the Plugins page (#/~plugins) and the frame every plugin view sits in.
+   Loaded by plugins.js; uses the dashboard's tokens (style.css). */
+.plugin-items{display:flex;align-items:center;gap:6px;flex:none}
+.plugin-menu{font-size:.95rem}
+
+.plugin-view{max-width:880px;margin:0 auto;padding:28px 16px 80px}
+.plugin-view h1{margin:6px 0 8px;font-size:1.6rem;letter-spacing:-.02em}
+.plugin-view h2{margin:30px 0 12px;font:600 .72rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+.plugin-view .lede{color:var(--ink2);max-width:70ch;margin:0 0 6px}
+.plugin-view code{font:500 .82em/1.3 var(--mono);background:var(--surface2);border-radius:5px;padding:1px 5px}
+.plugin-view .empty{text-align:left;margin:8px 0}
+
+.plugin-card{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:16px 18px;margin:0 0 14px;box-shadow:var(--shadow)}
+.plugin-card header{display:flex;gap:16px;align-items:flex-start;justify-content:space-between}
+.plugin-card h3{margin:0;font-size:1.02rem}
+.plugin-card h3 small{font:500 .72rem/1 var(--mono);color:var(--ink3);margin-left:4px}
+.plugin-card header p{margin:6px 0 0;color:var(--ink2);font-size:.9rem;max-width:68ch}
+.plugin-card .by{color:var(--ink3);font-size:.8rem}
+.plugin-card h4{margin:16px 0 8px;font:600 .7rem/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.plugin-card .err{color:var(--bad);font-size:.85rem;margin:8px 0 0}
+.plugin-card:not(.on){opacity:.85}
+
+/* the on / off switch */
+.switch{position:relative;flex:none;width:44px;height:26px;cursor:pointer}
+.switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.switch span{position:absolute;inset:0;border-radius:13px;background:var(--rule2);transition:background .15s}
+.switch span::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.switch input:checked + span{background:var(--gold)}
+.switch input:checked + span::after{transform:translateX(18px)}
+.switch input:focus-visible + span{outline:2px solid var(--gold);outline-offset:2px}
+.switch input:disabled + span{opacity:.4}
+
+/* a settings tab drawn from the plugin's schema */
+.plugin-settings{display:flex;flex-direction:column;gap:12px}
+.plugin-settings .field label{display:flex;flex-direction:column;gap:5px;font-size:.88rem;font-weight:600}
+.plugin-settings .field.inline label{flex-direction:row;align-items:center;gap:8px}
+.plugin-settings input[type=text],.plugin-settings input[type=number],.plugin-settings select{font:400 .9rem/1.3 ui-sans-serif,system-ui,sans-serif;
+  color:var(--ink);background:var(--bg);border:1px solid var(--rule2);border-radius:9px;padding:7px 10px;max-width:100%}
+.plugin-settings input[type=number]{width:9em}
+.plugin-settings select{width:auto;min-width:12em}
+.plugin-settings select,.plugin-settings input[type=number]{align-self:flex-start}
+.plugin-settings input:focus,.plugin-settings select:focus{outline:2px solid var(--gold);outline-offset:0}
+.plugin-settings .help{margin:4px 0 0;color:var(--ink3);font-size:.8rem;max-width:72ch}
+
+.plugin-commands{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.plugin-commands li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.88rem}
+.plugin-commands li span{color:var(--ink2);flex:1}
+

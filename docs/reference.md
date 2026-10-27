@@ -8,9 +8,11 @@ dashboard, and the code map.
 | The skill | `skill/` (`~/.claude/skills/qa-pass` is a symlink to it) | `SKILL.md`, the page template, `build.py` / `check.py` / `carry.py`, the page's own JS and CSS |
 | `qap`, the CLI | `src/qap/` | Where a pass goes, the next pass number, carry / build / check, projects, folders and moves |
 | The dashboard | `src/qap/web/` + `qap serve` | Icon tiles for projects, folders and subjects, a pass viewer with a selector made for 40+ passes, the search |
+| Plugins | `src/qap/plugins.py`, `src/qap/core_plugins/` | Obsidian-style plugins ([plugins.md](plugins.md)); `git-storage`, the git backup, is the first |
 
 The passes themselves are not here. They live in the content root, by default
-`~/Desktop/Dev/ai/QAP/contents` (its own folder, not in git).
+`~/Desktop/Dev/ai/QAP/contents` (its own folder, never in this repository; `qap storage git init` can back it
+up in a repository of its own).
 
 ## Run it
 
@@ -91,6 +93,12 @@ its folder name, title or qa-project when that is unique.
 | `qap rmdir <path>` | Removes an empty folder. `qap` never deletes a pass |
 | `qap place <file\|dir> <subject> [--as N] [--create] [--no-link]` | Moves a pass, or a whole old `choices/` folder, into a subject and leaves a symlink behind |
 | `qap serve [--port N] [--open]` | Starts the dashboard on 127.0.0.1 |
+| `qap plugins [list \| enable \| disable \| config \| install \| remove]` | Plugins: on / off, settings, install from a folder or a git URL ([plugins.md](plugins.md)) |
+| `qap storage git init --remote <url> [--branch main]` | Backs the content root up in a git remote, or restores a backup into an empty content root |
+| `qap storage git sync [-m MSG] [--no-push]` | Commits everything, pulls (merge or rebase), pushes. Never forced |
+| `qap storage git status [--fetch]` / `log [-n N]` | What is not backed up yet, a conflict, warnings / the latest commits |
+| `qap storage git commit [-m MSG]` | Commits here only, without the network |
+| `qap storage git resolve --mine \| --theirs` | Settles a conflict by keeping one side's files; the other side stays in the history |
 
 Example, for an agent:
 
@@ -147,11 +155,16 @@ browser keeps `localStorage` per origin. Served this way, a star made in pass 3 
 - The theme is the same as the pages' (`qa-theme`), so one toggle switches both. The dashboard also works
   at phone width.
 
+- **Plugins**: the ⧉ button in the top bar lists the plugins' commands (Ctrl/⌘ ⇧ P) and opens the Plugins
+  page (`#/~plugins`): each plugin's on/off switch, settings and commands. Plugins add status items (the
+  `git` pill) and views (`#/~plugins/git-storage/status`).
+
 The server is Python's `http.server`, bound to 127.0.0.1 only. It has a small JSON API (`GET /api/tree`,
 `GET /api/search`, `POST /api/mkdir|mv|rename|icon|rmdir|project`; a project is `@id` in a path) that
 calls the same functions as the CLI (`qap.layout`, `qap.search`). It
 refuses writes that do not come from its own origin (it checks the Host and Origin headers, and requires a
-JSON body).
+JSON body). Plugins add `GET /api/plugins`, `POST /api/plugins/<id>/enable|disable|settings|run/<command>`,
+their own `/api/plugins/<id>/<route>` (POSTs pass the same guards) and `/plugins/<id>/web/<file>`.
 
 ## How the skill uses it
 
@@ -176,12 +189,19 @@ src/qap/layout.py       the tree, resolve, and every write (mkdir, new subject, 
 src/qap/search.py       the search index (GET /api/search)
 src/qap/skill.py        build/check/carry wrappers, template seeding, safe rebuild
 src/qap/cli.py          argparse commands, prompts (prompt.py), --json output
-src/qap/server.py       http.server: static dashboard, /c/ content, JSON API
+src/qap/server.py       http.server: static dashboard, /c/ content, JSON API, plugin routes
+src/qap/plugins.py      the plugin host: manifests, discovery, on/off, Plugin (onload/onunload, add_command,
+                        register_route/event/interval, settings, data.json), events
+src/qap/plugin_cli.py   `qap plugins …` and the commands plugins add (qap storage git …)
+src/qap/core_plugins/   core plugins; git-storage/: main.py (wiring), store.py (git), web/ (pill + view)
 src/qap/web/            index.html, style.css, app.js (router), tiles.js, viewer.js, dialogs.js, icons.js, api.js,
-                        dom.js; search.js + search.css (the dialog, also loaded by pass pages), fuzzy.js (ranking)
+                        dom.js; search.js + search.css (the dialog, also loaded by pass pages), fuzzy.js (ranking);
+                        plugins.js + plugins.css (the dashboard's plugin host and Plugins page)
+examples/plugins/       build-log: the example plugin
 skill/assets/           qa-pass.js / qa-pass.css, inlined into every built page
 tests/                  unittest: layout functions, projects, CLI --json, the server, the search index and
-                        fuzzy.js (run with node when it is installed)
+                        fuzzy.js (run with node when it is installed), plugins, git-storage end to end (local bare
+                        repos in a temp dir)
 ```
 
 Run the tests with `uv run --project . python -m unittest discover -s tests`.

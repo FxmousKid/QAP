@@ -4,14 +4,17 @@
 //   #/authz                  a folder (tiles)
 //   #/authz/rbac             a subject: its latest pass in the frame
 //   #/authz/rbac?pass=3      a given pass;  &at=p3-1a  opens the page at that message
-// Search (top right, left of ‹ on a subject): ⌘K or Ctrl+K anywhere, the framed pass included; / too, except on a
-// subject, where / opens the pass list.
+//   #/~plugins[/<id>/<view>] the Plugins page, or a view a plugin added (plugins.js)
+// The top bar, left to right: brand, breadcrumb, the view's tools, the plugins' status items and ⧉ menu (plugins.js),
+// the theme, and the search at the far right (on a subject it sits left of ‹ instead). Search: ⌘K or Ctrl+K anywhere,
+// the framed pass included; / too, except on a subject, where / opens the pass list.
 import { api } from "./api.js";
 import { loadIcons, glyph, defaultIcon } from "./icons.js";
 import { el, toast, closeMenu } from "./dialogs.js";
 import { renderFolder, dropTarget, newFolder, newProject, href } from "./tiles.js";
 import { renderViewer, leaveViewer, frameTheme } from "./viewer.js";
 import { searchButton, openSearch, isShortcut, isOpen, invalidate, SHORTCUT } from "./search.js";
+import { startPlugins, renderPluginRoute, emit as emitPlugins } from "./plugins.js";
 
 const view = document.getElementById("view");
 const crumbs = document.getElementById("crumbs");
@@ -28,6 +31,7 @@ const ctx = {
   projects: () => projects,
   find: (path) => index.get(path),
   refresh: async () => { invalidate(); await load(); render(); },
+  view, tools, crumbs,
 };
 
 async function load() {
@@ -39,6 +43,7 @@ async function load() {
   projects = (tree.projects || []).map((p) => ({ ...p, children: tree.children.filter((c) => c.project === p.id) }));
   projects.forEach((p) => index.set(p.path, p));
   lastLoad = Date.now();
+  emitPlugins("tree", tree);
 }
 
 function route() {
@@ -74,10 +79,17 @@ function render() {
   closeMenu();
   if (!tree) return;
   const { path, params } = route();
+  if (path.startsWith("~")) { // never a content path: the content's names start with a letter or a digit
+    leaveViewer();
+    renderPluginRoute(path);
+    emitPlugins("route", { path });
+    return;
+  }
   const node = index.get(path);
+  emitPlugins("route", { path, node });
   if (!node) {
     leaveViewer();
-    tools.replaceChildren(searchButton());
+    tools.replaceChildren();
     crumbs.replaceChildren();
     view.replaceChildren(el("section", { class: "folder" },
       el("p", { class: "empty" }, `Nothing at “${path}” (moved or renamed?). Search for it (${SHORTCUT}), or `,
@@ -99,7 +111,7 @@ function render() {
     title: "Create a project (work, personal…): a box of families that never mix with another project's",
     onclick: () => newProject(ctx) });
   const create = home && projects.length ? [newProjectButton] : home ? [newFolderButton, newProjectButton] : [newFolderButton];
-  tools.replaceChildren(...create, searchButton());
+  tools.replaceChildren(...create);
   renderFolder(view, node, ctx);
 }
 
@@ -139,10 +151,13 @@ window.addEventListener("focus", async () => {
 
 (async function start() {
   setTheme(document.documentElement.dataset.theme || "light", true);
+  document.getElementById("search").replaceChildren(searchButton()); // every view but a subject's (style.css)
   await loadIcons();
   try { await load(); } catch (e) {
     view.replaceChildren(el("p", { class: "empty", text: `Cannot read the content: ${e.message}` }));
     return;
   }
+  const plugins = startPlugins(ctx); // the top-bar items now; the plugins' own parts load in the background
   render();
+  plugins.then(() => { if (route().path.startsWith("~")) render(); });
 })();

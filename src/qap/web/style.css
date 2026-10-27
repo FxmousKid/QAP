@@ -50,7 +50,10 @@ svg{display:block}
 .btn:disabled{opacity:.45;cursor:default}
 [data-drop-ok]{outline:2px dashed var(--gold);outline-offset:2px;background:color-mix(in oklab,var(--gold) 12%,transparent)}
 
-/* the search button: top right in every view, just left of ‹ on a subject (search.js; the dialog is search.css) */
+/* the search button: far right of the bar in every view, just left of ‹ on a subject, where the bar's own one hides
+   (search.js; the dialog is search.css) */
+.searchslot{flex:none;display:flex;align-items:center}
+body.viewing .searchslot{display:none}
 .searchbtn{flex:none;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--rule2);background:var(--surface);
   border-radius:999px;cursor:pointer;color:var(--ink2);padding:4px 5px 4px 11px;font:600 .78rem/1 var(--mono);white-space:nowrap}
 .searchbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round}
