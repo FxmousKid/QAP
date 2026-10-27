@@ -13,6 +13,14 @@ localStorage per origin. Served from here, every pass of a subject (and the dash
   POST /api/icon          {path, icon?, color?}                  -> layout.set_meta
   POST /api/rmdir         {path}                                 -> layout.remove_folder (empty folders only)
 
+  Plugins (qap.plugins):
+  GET  /api/plugins                       every plugin, on or off, with its settings and commands
+  POST /api/plugins/<id>/enable|disable   turn it on or off (saved, and loaded or unloaded right away)
+  POST /api/plugins/<id>/settings         {key: value, ...}
+  POST /api/plugins/<id>/run/<command>    run a plugin command with {arg: value}
+  GET|POST /api/plugins/<id>/<route>      a route the plugin registered
+  GET  /plugins/<id>/web/<file>           the plugin's dashboard part (its web/ folder only)
+
 Writes are refused unless the request comes from this origin (Host and Origin checked, JSON body), so a web
 page elsewhere cannot drive them; the Host check also stops DNS-rebinding reads.
 """
@@ -28,9 +36,9 @@ import webbrowser
 from email.utils import formatdate, parsedate_to_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import icons, layout as L
+from . import icons, layout as L, plugins as PL
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8750
@@ -47,6 +55,7 @@ def content_type(path: Path) -> str:
 class Handler(BaseHTTPRequestHandler):
     server_version = "qap"
     root: Path
+    app: PL.App
     lock = threading.Lock()
 
     # -------------------------------------------------------------- guards
@@ -125,6 +134,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(500, {"ok": False, "error": str(e)})
         if path == "/favicon.ico":
             return self._file(WEB / "favicon.svg")
+        if path == "/api/plugins":
+            return self._json(200, {"ok": True, "app_version": self.app.version, "plugins": self.app.describe()})
+        if path.startswith("/plugins/"):  # a plugin's dashboard files: only what sits in its web/ folder
+            pid, _, rest = path[len("/plugins/"):].partition("/")
+            plugin = self.app.plugins.get(pid)
+            target = self._under(plugin.folder / "web", rest[len("web/"):]) if plugin and rest.startswith("web/") else None
+            if target is None or not target.is_file():
+                return self._json(404, {"ok": False, "error": "not found"})
+            return self._file(target)
+        if path.startswith("/api/plugins/"):
+            query = {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
+            return self._plugin_call("GET", path, query)
         return self._json(404, {"ok": False, "error": "not found"})
 
     @staticmethod
@@ -150,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected a JSON object")
         except ValueError as e:
             return self._json(400, {"ok": False, "error": f"bad JSON: {e}"})
+        if urlsplit(self.path).path.startswith("/api/plugins/"):
+            return self._plugin_call("POST", unquote(urlsplit(self.path).path), body)
         action = urlsplit(self.path).path.removeprefix("/api/")
         handler = ACTIONS.get(action)
         if not handler:
@@ -159,7 +182,41 @@ class Handler(BaseHTTPRequestHandler):
                 result = handler(self.root, body)
         except (L.LayoutError, ValueError, OSError) as e:
             return self._json(400, {"ok": False, "error": str(e)})
+        self.app.emit("content_changed", {"action": action, "source": "dashboard", "request": body})
         return self._json(200, {"ok": True, **result})
+
+    # -------------------------------------------------------------- plugins
+    def _plugin_call(self, method: str, path: str, body: dict) -> None:
+        pid, _, rest = path[len("/api/plugins/"):].partition("/")
+        app = self.app
+        try:
+            if method == "POST" and rest in ("enable", "disable"):
+                app.enable(pid) if rest == "enable" else app.disable(pid)
+                return self._json(200, {"ok": True, "plugins": app.describe()})
+            if method == "POST" and rest == "settings":
+                plugin = app.get(pid)
+                saved = {key: plugin.set_setting(key, value) for key, value in body.items()}
+                return self._json(200, {"ok": True, "saved": saved})
+            if method == "POST" and rest.startswith("run/"):
+                cmd = app._commands.get(f"{pid}:{rest[4:]}")
+                if not cmd:
+                    return self._json(404, {"ok": False, "error": f"no command {pid}:{rest[4:]}"})
+                known = cmd.defaults()
+                result = app.run_command(cmd.full_id, {k: v for k, v in body.items() if k in known},
+                                         source="dashboard")
+            else:
+                handler = app.route(pid, method, rest)
+                if not handler:
+                    return self._json(404, {"ok": False, "error": f"no route {method} {path}"})
+                result = {"ok": True, **(handler(body) or {})}
+        except PL.PluginError as e:
+            return self._json(400, {"ok": False, "error": str(e)})
+        except Exception as e:  # a plugin bug is a 500 for that call, never a dead server
+            app.log(f"plugin {pid}: {method} {rest} failed: {type(e).__name__}: {e}")
+            return self._json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if not result.get("ok", True):
+            result.setdefault("error", result.get("text") or "failed")
+        return self._json(200, result)
 
 
 # ------------------------------------------------------------------ actions (same functions as the CLI)
@@ -220,8 +277,10 @@ ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_i
 
 # ------------------------------------------------------------------ entry point
 
-def make_server(root: Path, port: int | None) -> ThreadingHTTPServer:
-    handler = type("QapHandler", (Handler,), {"root": root})
+def make_server(root: Path, port: int | None, app: PL.App | None = None) -> ThreadingHTTPServer:
+    app = app or PL.App(root, mode="serve")  # no plugin loaded unless the caller loaded them
+    app.set_root(root)
+    handler = type("QapHandler", (Handler,), {"root": root, "app": app})
     explicit = port is not None
     port = DEFAULT_PORT if port is None else port
     for candidate in [port] if explicit else range(port, port + 20):
@@ -236,10 +295,14 @@ def make_server(root: Path, port: int | None) -> ThreadingHTTPServer:
     raise OSError(f"ports {port}-{port + 19} are all taken; pick one with --port")
 
 
-def serve(root: Path, port: int | None = None, open_browser: bool = False, as_json: bool = False) -> None:
+def serve(root: Path, port: int | None = None, open_browser: bool = False, as_json: bool = False,
+          app: PL.App | None = None) -> None:
     if not root.is_dir():
         raise L.LayoutError(f"content root {root} does not exist (`qap config content_root <path>`)")
-    httpd = make_server(root, port)
+    if app is None:
+        app = PL.App(root, mode="serve")
+        app.load_enabled()
+    httpd = make_server(root, port, app)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
     if as_json:
         print(json.dumps({"ok": True, "url": url, "root": str(root), "pid": __import__("os").getpid()}), flush=True)
@@ -247,9 +310,13 @@ def serve(root: Path, port: int | None = None, open_browser: bool = False, as_js
         print(f"QA passes dashboard: {url}\n  content: {root}\n  Ctrl+C to stop", flush=True)
     if open_browser:
         threading.Timer(0.3, webbrowser.open, (url,)).start()
+    # "startup" runs beside the server (a git pull must not hold the dashboard back)
+    threading.Thread(target=app.emit, args=("startup", {"url": url}), name="qap-startup", daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped", file=sys.stderr)
     finally:
         httpd.server_close()
+        app.emit("shutdown", {})
+        app.unload_all()

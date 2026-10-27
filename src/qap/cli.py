@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import config, icons, layout as L, passes as P, prompt, skill
+from . import config, icons, layout as L, passes as P, plugin_cli, plugins, prompt, skill
 
 EPILOG = """examples:
   qap list                                  the tree of folders, subjects and passes
@@ -24,6 +24,8 @@ EPILOG = """examples:
   qap mv authz work                         move a folder (or a subject) into another folder
   qap place ~/old/choices brain/prd16       move a folder of passes in; leaves a symlink behind
   qap serve --open                          the dashboard on http://127.0.0.1:8750
+  qap plugins                               plugins: core (git-storage) and community ones
+  qap storage git init --remote <url>       back the content up in a git remote (git-storage plugin)
 """
 
 
@@ -349,7 +351,14 @@ def cmd_build(args) -> None:
             if "check" in r:
                 lines.append(r["check"]["output"])
     failed = [r for r in results if not r["ok"] or (r.get("check") and not r["check"]["ok"])]
-    emit(args, {"subject": node["path"], "results": results}, "\n".join(lines) or "nothing to build")
+    data = {"subject": node["path"], "results": results}
+    heard = args.app.emit("pass_built", {"subject": node["path"], "ok": not failed, "source": "cli",
+                                         "pages": [r["html"] for r in results if r["ok"]],
+                                         "interactive": prompt.interactive(args)}) if hasattr(args, "app") else {}
+    if heard:
+        data["plugins"] = heard
+        lines += [r["text"] for r in heard.values() if r.get("text")]
+    emit(args, data, "\n".join(lines) or "nothing to build")
     if failed and not args.all:
         raise SystemExit(1)
 
@@ -372,12 +381,17 @@ def cmd_check(args) -> None:
 
 def cmd_serve(args) -> None:
     from . import server
-    server.serve(root_of(args), args.port, args.open, as_json=args.json)
+    app = getattr(args, "app", None)
+    if app is not None:  # reload the plugins in serve mode: their intervals run while the server does
+        app.unload_all()
+        app.mode = "serve"
+        app.load_enabled()
+    server.serve(root_of(args), args.port, args.open, as_json=args.json, app=app)
 
 
 # ---------------------------------------------------------------------------- parser
 
-def parser() -> argparse.ArgumentParser:
+def parser(app: plugins.App | None = None) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", help="content root (default: QAP_CONTENT_ROOT, then config, then "
                                        "~/Desktop/Dev/ai/QAP/contents)")
@@ -467,26 +481,42 @@ def parser() -> argparse.ArgumentParser:
     p = add("serve", cmd_serve, "serve the dashboard and the content on 127.0.0.1")
     p.add_argument("--port", type=int, default=None, help="default 8750 (the next free one if taken)")
     p.add_argument("--open", action="store_true", help="open the dashboard in the browser")
+    if app is not None:
+        plugin_cli.add_parsers(sub, common, app)
     return ap
 
 
+# Commands that change the content: plugins hear "content_changed" after each of them.
+CHANGES = {"new-subject", "mkdir", "mv", "rmdir", "rename", "icon", "place", "carry"}
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = parser()
+    app = plugins.App()
+    app.load_enabled()
+    ap = parser(app)
     args = ap.parse_args(argv)
     if not getattr(args, "fn", None):
-        ap.print_help()
+        (getattr(args, "group_help", None) or ap.print_help)()
         return 0
+    args.app = app
     try:
+        app.set_root(root_of(args))
         args.fn(args)
+        if args.command in CHANGES:
+            app.emit("content_changed", {"action": args.command, "source": "cli"})
     except prompt.Cancelled:
         print("cancelled", file=sys.stderr)
         return 130
-    except (Fail, L.LayoutError, ValueError, LookupError, FileNotFoundError, OSError) as e:
+    except SystemExit as e:  # a command that printed its output and failed (build, a plugin command)
+        return e.code if isinstance(e.code, int) else 1
+    except (Fail, L.LayoutError, plugins.PluginError, ValueError, LookupError, FileNotFoundError, OSError) as e:
         if args.json:
             print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
         else:
             print(f"qap: {e}", file=sys.stderr)
         return 1
+    finally:
+        app.unload_all()
     return 0
 
 

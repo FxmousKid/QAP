@@ -3,11 +3,13 @@
 //   #/authz                  a folder (tiles)
 //   #/authz/rbac             a subject: its latest pass in the frame
 //   #/authz/rbac?pass=3      a given pass;  &at=p3-1a  opens the page at that message
+//   #/~plugins[/<id>/<view>] the Plugins page, or a view a plugin added (plugins.js)
 import { api } from "./api.js";
 import { loadIcons, glyph } from "./icons.js";
 import { el, toast, closeMenu } from "./dialogs.js";
 import { renderFolder, dropTarget, newFolder, href } from "./tiles.js";
 import { renderViewer, leaveViewer, frameTheme } from "./viewer.js";
+import { startPlugins, renderPluginRoute, emit as emitPlugins } from "./plugins.js";
 
 const view = document.getElementById("view");
 const crumbs = document.getElementById("crumbs");
@@ -22,6 +24,7 @@ const ctx = {
   tree: () => tree,
   find: (path) => index.get(path),
   refresh: async () => { await load(); render(); },
+  view, tools, crumbs,
 };
 
 async function load() {
@@ -31,6 +34,7 @@ async function load() {
   const walk = (n) => { index.set(n.path, n); (n.children || []).forEach(walk); };
   walk(tree);
   lastLoad = Date.now();
+  emitPlugins("tree", tree);
 }
 
 function route() {
@@ -64,7 +68,14 @@ function render() {
   closeMenu();
   if (!tree) return;
   const { path, params } = route();
+  if (path.startsWith("~")) { // never a content path: the content's names start with a letter or a digit
+    leaveViewer();
+    renderPluginRoute(path);
+    emitPlugins("route", { path });
+    return;
+  }
   const node = index.get(path);
+  emitPlugins("route", { path, node });
   if (!node) {
     leaveViewer();
     tools.replaceChildren();
@@ -113,5 +124,7 @@ window.addEventListener("focus", async () => {
     view.replaceChildren(el("p", { class: "empty", text: `Cannot read the content: ${e.message}` }));
     return;
   }
+  const plugins = startPlugins(ctx); // the top-bar items now; the plugins' own parts load in the background
   render();
+  plugins.then(() => { if (route().path.startsWith("~")) render(); });
 })();

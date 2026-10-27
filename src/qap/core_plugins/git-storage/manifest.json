@@ -1,0 +1,10 @@
+{
+  "id": "git-storage",
+  "name": "Git storage",
+  "version": "0.1.0",
+  "minAppVersion": "0.1.0",
+  "description": "Back up and sync the content root (projects, folders, subjects, passes) with a remote git repository: commit-and-sync after each build and on an interval, sync when the dashboard starts, never force-push, stop and show on a conflict.",
+  "author": "QAP",
+  "main": "main.py",
+  "web": {"main": "web/main.js", "style": "web/style.css"}
+}
