@@ -1,6 +1,6 @@
-"""Build a demo content tree with qap itself: four folders, ten subjects, and one subject (Payment retries)
-with three real passes (pass 1 written here, passes 2 and 3 started by `qap carry`). Invented topics and data.
-The README's screenshots are taken from it.
+"""Build a demo content tree with qap itself: two projects (Work and Personal), six families, fourteen subjects,
+and one subject (Payment retries) with three real passes (pass 1 written here, passes 2 and 3 started by
+`qap carry`). Invented topics and data. The README's screenshots are taken from it.
 
 Usage: python3 examples/make_demo.py <new content root> [<qap>]     (qap defaults to this repo's bin/qap)
 Then:  bin/qap serve --root <new content root> --open
@@ -175,6 +175,22 @@ def main() -> None:
     qap("icon", "onboarding-emails", "mail", "--color", "#E8673C")
     qap("icon", "mobile-release", "rocket", "--color", "#D6304F")
 
+    # ---- projects: the first one holds every family made so far; Personal gets its own families ----
+    qap("project", "new", "work", "--title", "Work", "--icon", "briefcase", "--color", "#2F6FDB")
+    qap("project", "new", "personal", "--title", "Personal", "--icon", "home", "--color", "#1E9E3A")
+    for path, title, icon, color in (("home", "Home", "🏡", "#A8650C"), ("side-projects", "Side projects", "code", "#7B2CBF")):
+        qap("mkdir", path, "--title", title, "--icon", icon, "--project", "personal")
+        qap("icon", path, icon, "--color", color)
+    personal = (
+        ("home/kitchen-renovation", "Kitchen renovation", "🛠️", "demo-kitchen"),
+        ("side-projects/photo-backup", "Photo backup", "📷", "demo-photo-backup"),
+        ("side-projects/reading-list", "Reading list", "book", "demo-reading-list"),
+        ("half-marathon", "Half-marathon plan", "🏃", "demo-half-marathon"),
+    )
+    for path, title, icon, project in personal:
+        qap("new-subject", path, "--title", title, "--icon", icon, "--qa-project", project, "--project", "personal")
+    subjects += personal
+
     # ---- the showcase: payment retries, three passes ----
     s, p = "payments/payment-retries", "demo-payment-retries"
     chart(ROOT / s / "img")
@@ -340,6 +356,18 @@ with 61 % fewer complaints.</p>
         "mobile-release": ("Release 2.4 ships to 10 % first, then everyone after 48 hours", "rollout agreed",
                            "how do we roll out 2.4?",
                            "Staged: 10 % for 48 hours, then 100 % if crash-free sessions stay above 99.5 %."),
+        "home/kitchen-renovation": ("Order the worktop first: it takes six weeks", "plan agreed",
+                                    "what do we order first?",
+                                    "The worktop: six weeks to cut. The cabinets take two, the tiles one."),
+        "side-projects/photo-backup": ("Back up the photos twice: a disk at home and one copy off-site", "setup agreed",
+                                       "is one external disk enough?",
+                                       "No: one disk is one failure away from losing everything. Keep a second copy off-site."),
+        "side-projects/reading-list": ("Three books a month, picked on the first Sunday", "habit agreed",
+                                       "how do I stop the list from growing forever?",
+                                       "Pick three on the first Sunday of the month; the rest waits, unread, guilt-free."),
+        "half-marathon": ("Twelve weeks, four runs a week, one long run on Sunday", "plan agreed",
+                          "how long do I need to train for a half-marathon?",
+                          "Twelve weeks from 25 km a week: four runs, the long one on Sunday, +10 % a week at most."),
     }
     projects = {path: project for path, _, _, project in subjects}
     for path, (title, chip, question, answer) in smalls.items():

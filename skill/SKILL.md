@@ -38,6 +38,11 @@ The page comes with this behaviour built in; you never write it by hand:
   (the label stays in its tooltip). It returns to the link, reopening its folds, and flashes it. Jumps stack
   ("+2"); it fades 20 s after the last jump (hovering keeps it) and hides once nothing is left to return to.
   The browser's Back does the same thing; the key is `b`.
+- **Search over every pass.** Served by `qap serve`, the page gets a "Search" button in the top row, left of
+  the theme toggle (`⌘K` / `Ctrl+K` or `/`): a fuzzy search over every project, family, subject and pass,
+  section titles included, whose results open in the dashboard. Inside the dashboard the dashboard's own
+  button does it (left of `‹`). Opened as a file there is no button. Nothing to write: `build.py` and
+  `qa-pass.js` do it, and section titles are searchable only through their `h2` ids, which you give anyway.
 - **Responsive to the screen.** The page detects the pixel ratio, the window width tier (`xs`…`xxl`) and
   ultrawide screens, sets them on `<html>` (`data-dpr`, `data-size`, `data-ultrawide`), and re-detects on
   resize, zoom or a move to another screen.
@@ -81,7 +86,8 @@ Every QA pass lives in one content tree, browsed in a dashboard (`qap serve`):
 
 ```
 ~/Desktop/Dev/ai/QAP/contents/      (qap config content_root; QAP_CONTENT_ROOT wins)
-  <folder>/ …                              folders nest; folder.json {title, icon, order}
+  projects.json                            the projects (work, personal…): {default, projects: [{id, title, icon}]}
+  <folder>/ …                              folders nest; folder.json {title, icon, order, project}
     <subject>/                             subject.json {title, icon, qa_project, sources, created}
       QA-PASS-N.src.html                   ← you edit this (qap carry writes it)
       img/                                 ← PNG/SVG/JPG for every pass (+ the scripts that drew them)
@@ -95,10 +101,11 @@ or, when unique, its folder name, title or qa-project.
 
 ```bash
 Q=~/Desktop/Dev/ai/QAP/QAP/bin/qap
-$Q list --json                         # folders, subjects, pass counts: find the subject first
+$Q list --json                         # projects, folders, subjects, pass counts: find the subject first
 $Q where interaction --json            # its folder, qa-project, latest pass, next pass number and file names
 $Q new-subject db-migration-v3/billing --title "Billing (PRD-120)" --icon 💳 --qa-project v3-billing --json
-                                       # a new subject: ask the user which folder if no folder fits
+                                       # a new subject: ask the user which folder if no folder fits; a new
+                                       # top-level folder (a family) also needs its project: --project personal
 $Q carry interaction [--skip p7,p8] [--stars stars.txt] --json
                                        # starts the next pass: carry.py from the latest source, or the
                                        # template (qa-project and number filled in) for pass 1
@@ -108,11 +115,14 @@ $Q build interaction --all             # rebuild every page that has a source; k
 $Q place ~/somewhere/choices db-migration-v3/billing --create --title "Billing" --json
                                        # move passes made elsewhere in; leaves a symlink at the old place
 $Q mkdir / mv / rename / icon / rmdir  # organise (the dashboard does the same: drag a tile onto a folder)
+$Q project list | new | move | set | rm # projects above the families (`qap project move <family> <project>`)
 $Q serve --open                        # the dashboard: http://127.0.0.1:8750 (one origin: stars persist)
 ```
 
 - One subject = one conversation thread (one qa-project), passes `QA-PASS-1`, `QA-PASS-2`, … in it. A
   new topic is a new subject; ask the user which folder it goes in when it is not obvious (`qap list`).
+- Project > family > subject > pass. A project (work, personal) is not a folder: it is the `project` of a
+  top-level folder. `--project` is that; `--qa-project` is the pages' stars key. Never mix them up.
 - Never write a pass outside the content root, and never into a code repo, unless the user asks. An old
   `<project>/choices/` path is a symlink into the content root now: it still works, but `qap where` gives
   the real path.

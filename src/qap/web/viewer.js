@@ -1,9 +1,12 @@
 // The subject view: one pass in a large frame, and a selector made for subjects with 40+ passes:
-// ‹ › steps, a strip of every pass number, and a searchable list (click "Pass N", or press /).
-// Keys: ← → (or [ ]) older / newer, Home / End first / latest, / search. [ ] also work inside the page.
+// ‹ › steps, a strip of every pass number, and a searchable list (click "Pass N", or press /). The search over
+// everything sits just left of ‹.
+// Keys: ← → (or [ ]) older / newer, Home / End first / latest, / the pass list, ⌘K (Ctrl+K) the search.
+// [ ], / and ⌘K also work inside the page.
 import { contentUrl } from "./api.js";
 import { el } from "./dialogs.js";
 import { href, shortDate } from "./tiles.js";
+import { searchButton, openSearch, isShortcut } from "./search.js";
 
 let current = null; // {node, index, frame, strip, pick}
 
@@ -78,7 +81,7 @@ function passNav(node, index) {
     const on = strip.querySelector('[aria-current="true"]');
     if (on) strip.scrollLeft = on.offsetLeft - strip.clientWidth / 2 + on.offsetWidth / 2;
   });
-  return el("div", { class: "passnav" }, prev, pick, next, strip, open);
+  return el("div", { class: "passnav" }, searchButton({ compact: true }), prev, pick, next, strip, open);
 }
 
 // ---- the searchable list ----
@@ -157,7 +160,10 @@ function wireFrame(frame) {
   try { doc = frame.contentDocument; } catch (x) { return; }
   if (!doc || doc.__qapWired) return;
   doc.__qapWired = true;
-  doc.addEventListener("keydown", (e) => onKey(e, true));
+  doc.addEventListener("keydown", (e) => {
+    if (isShortcut(e)) { e.preventDefault(); openSearch(); return; }
+    onKey(e, true);
+  });
   // A theme picked in the dashboard reaches pages built before they listened for it.
   const theme = document.documentElement.dataset.theme;
   if (doc.documentElement.dataset.theme && doc.documentElement.dataset.theme !== theme) {

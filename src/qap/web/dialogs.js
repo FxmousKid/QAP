@@ -1,18 +1,8 @@
 // Small UI pieces: a toast, a context menu, a form dialog, the icon picker and the "move to" list.
 import { glyph, iconNames, colorOf, PALETTE, defaultIcon } from "./icons.js";
+import { el } from "./dom.js";
 
-export function el(tag, attrs = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === null || v === false) continue;
-    if (k === "class") node.className = v;
-    else if (k === "text") node.textContent = v;
-    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v === true ? "" : v);
-  }
-  for (const c of children.flat()) if (c != null) node.append(c);
-  return node;
-}
+export { el };
 
 // ---- toast: one line at the bottom, with an optional action (Undo) ----
 let toastTimer = 0;
@@ -121,22 +111,40 @@ export function iconPicker(node, state) {
   return paint;
 }
 
-// ---- "Move to…": every folder of the tree; the item itself, its descendants and its parent are disabled ----
-export function moveDialog(tree, item) {
+// ---- "Move to…": every folder of the tree, under its project when there are projects (a project means its top
+// level). The item itself, its descendants and where it is now are disabled ----
+export function moveDialog(tree, item, projects = []) {
   return dialog(`Move “${item.title}” to…`, (body) => {
     const list = el("div", { class: "folders-list" });
     const parent = item.path.includes("/") ? item.path.slice(0, item.path.lastIndexOf("/")) : "";
+    const here = !item.path.includes("/") && item.project ? "@" + item.project : parent;
+    const row = (path, icon, title, depth, disabled) => {
+      const b = el("button", { type: "button", disabled,
+        onclick: () => body.dispatchEvent(new CustomEvent("qap:done", { detail: path })) },
+        glyph(icon, path.startsWith("@") ? "layers" : "folder"), el("span", { text: title }));
+      b.style.paddingLeft = 10 + depth * 18 + "px";
+      list.append(b);
+    };
     const walk = (node, depth) => {
       if (node.kind !== "folder") return;
       const inside = node.path === item.path || node.path.startsWith(item.path + "/");
-      const b = el("button", { type: "button", disabled: inside || node.path === parent,
-        onclick: () => body.dispatchEvent(new CustomEvent("qap:done", { detail: node.path })) },
-        glyph(node.path ? node.icon : "folder", "folder"), el("span", { text: node.path ? node.title : "QA passes (top level)" }));
-      b.style.paddingLeft = 10 + depth * 18 + "px";
-      list.append(b);
+      row(node.path, node.icon, node.title, depth, inside || node.path === here);
       if (!inside) node.children.forEach((c) => walk(c, depth + 1));
     };
-    walk(tree, 0);
+    if (projects.length) {
+      for (const p of projects) {
+        row(p.path, p.icon, `${p.title} (project)`, 0, p.path === here);
+        p.children.forEach((c) => walk(c, 1));
+      }
+      const loose = tree.children.filter((c) => !c.project);
+      if (loose.length) {
+        row("", "folder", "QA passes (top level, no project)", 0, here === "");
+        loose.forEach((c) => walk(c, 1));
+      }
+    } else {
+      row("", "folder", "QA passes (top level)", 0, here === "");
+      tree.children.forEach((c) => walk(c, 1));
+    }
     body.append(list);
     return () => undefined;
   }, null);

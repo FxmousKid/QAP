@@ -129,6 +129,16 @@ footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--rule);font-si
 #stars-open .ss{display:inline-flex;align-items:center}
 #stars-open .count{font-weight:600;color:var(--ink3);margin-left:4px}
 #theme-toggle{right:calc(var(--edge) + var(--stars-w, 112px) + 8px)}
+/* Search (only when served by qap serve; qa-pass.js adds it): left of the theme toggle */
+#search-open{right:calc(var(--edge) + var(--stars-w, 112px) + var(--theme-w, 84px) + 16px)}
+#search-open svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
+#search-open:hover svg{stroke:var(--gold)}
+@media (max-width:700px){#search-open .lbl{display:none}#search-open{padding:6px 9px}}
+#search-hint{position:fixed;top:54px;right:var(--edge);z-index:32;max-width:min(46ch,calc(100vw - 32px));padding:8px 12px;
+  border:1px solid var(--rule2);border-radius:10px;background:var(--surface);color:var(--ink2);font:500 .75rem/1.45 var(--mono);
+  box-shadow:0 4px 18px rgba(0,0,0,.14)}
+#search-hint[hidden]{display:none}
+@media print{#search-open,#search-hint{display:none}}
 
 /* ===== "back to where I clicked": faint until hovered, in the top row right of the Contents button =====
    qa-pass.js shows it after an in-page jump and fades it out 20 s later. It sets --back-left (Contents' right

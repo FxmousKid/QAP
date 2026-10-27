@@ -3,7 +3,7 @@
 Tooling for **QA passes**: the pages an AI agent writes, one per round of a design conversation, for a human to read
 and answer.
 
-![The dashboard: folders and subjects as coloured icon tiles](docs/img/dashboard.png)
+![A project in the dashboard: its families and subjects as coloured icon tiles](docs/img/project.png)
 
 ## A QA pass
 
@@ -24,12 +24,43 @@ into, and a button back to where you clicked. CSS, JS and images are inlined: th
 qap new-subject payments/retries --title "Payment retries" --icon chart --qa-project retries
 qap carry retries              # start the next pass: fold the last round, add the new round's placeholders
 qap build retries --check      # build the page (links, labels, inlined images), then lint it
-qap list                       # folders, subjects and their passes
+qap list                       # projects, families, subjects and their passes
 qap serve --open               # the dashboard
 ```
 
 Agents add `--json`: no prompts, JSON out. `skill/` is the `qa-pass` agent skill that tells an agent how to write a
 pass and when to call `qap`.
+
+## Projects
+
+A **project** (work, personal…) holds **families** (the top-level folders: Payments, Platform…), which hold
+**subjects** (Payment retries…), which hold the **passes**. The home shows one box per project, so work and personal never mix.
+
+![The home: a Work box and a Personal box, each with the families it holds under it](docs/img/dashboard.png)
+
+```bash
+qap project new work --title Work --icon briefcase   # the first project holds every family there is
+qap project new personal --title Personal --icon home
+qap project move side-projects personal              # or drag the family's tile onto the project
+qap mkdir garden --title Garden --project personal   # a new family, straight in its project
+```
+
+A project is an entry of `projects.json` at the content root, and a family joins it through `"project"` in its own
+`folder.json`. No file moves, so every link and symlink keeps working; without `projects.json` nothing changes.
+
+## Search
+
+Fuzzy search over every project, family, subject and pass (titles, folder names, each pass's heading and section
+titles), top right on every view and just left of `‹` on a subject. `⌘K` (`Ctrl+K`) anywhere, `/` outside a subject.
+Empty, it shows the home; typing ranks the same boxes, with project › family › subject under each. `Enter` opens,
+at the matching section when a section matched.
+
+<p>
+  <img src="docs/img/search-home.png" width="49%" alt="The search dialog, empty: the two project boxes and the six subjects updated last, as cards with their icon boxes">
+  <img src="docs/img/search.png" width="49%" alt="The search dialog for 'retry': the subject Payment retries, then its three passes, the matched words highlighted">
+</p>
+
+A pass opened alone from `qap serve` has the same Search button in its top row; opened as a file it has none.
 
 ## The dashboard
 

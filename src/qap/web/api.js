@@ -13,9 +13,12 @@ async function call(path, body) {
   return data;
 }
 
+// A project is "@<id>" wherever a path goes: mkdir("@work", …) makes a top-level folder in it, mv(x, "@work") puts x
+// in it, rename / icon / rmdir("@work") change or delete it.
 export const api = {
   tree: () => call("/api/tree"),
   mkdir: (parent, title, icon, color) => call("/api/mkdir", { parent, title, icon, color }),
+  project: (title, icon, color) => call("/api/project", { title, icon, color }),
   mv: (src, dest) => call("/api/mv", { src, dest }),
   rename: (path, title) => call("/api/rename", { path, title }),
   icon: (path, icon, color) => call("/api/icon", { path, icon, color }),

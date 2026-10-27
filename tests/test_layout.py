@@ -239,5 +239,96 @@ class Writing(Fixture):
             L.place(self.root, f, "nowhere/new")
 
 
+class Projects(Fixture):
+    """Projects group the top-level folders; nothing moves on disk."""
+
+    def test_no_projects_reads_as_before(self):
+        t = L.tree(self.root)
+        self.assertEqual(t["projects"], [])
+        self.assertEqual({c["project"] for c in t["children"]}, {""})
+
+    def test_first_project_is_the_default_and_holds_everything(self):
+        before = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*"))
+        node = L.make_project(self.root, "work", title="Work", icon="briefcase")
+        self.assertTrue(node["default"])
+        self.assertEqual(node["members"], ["db", "authz", "misc"])
+        self.assertEqual((node["families"], node["subjects"]), (3, 4))
+        after = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*"))
+        self.assertEqual(after, sorted(before + ["projects.json"]))  # only the registry is written
+        self.assertEqual({c["project"] for c in L.tree(self.root)["children"]}, {"work"})
+
+    def test_assign_move_up_and_refusals(self):
+        L.make_project(self.root, "work", title="Work")
+        L.make_project(self.root, None, title="Side Projects")  # the id comes from the title
+        res = L.assign_project(self.root, "authz", "@side-projects")
+        self.assertEqual((res["from"], res["path"], res["project"]), ("@work", "authz", "side-projects"))
+        self.assertEqual(L.read_json(self.root / "authz/folder.json")["project"], "side-projects")
+        with self.assertRaises(L.LayoutError):
+            L.assign_project(self.root, "authz", "side-projects")  # already there
+        res = L.assign_project(self.root, "db/signal", "side-projects")  # below the top: moved up first
+        self.assertEqual((res["from"], res["path"]), ("db", "signal"))
+        self.assertTrue((self.root / "signal/subject.json").is_file())
+        projects = {p["id"]: p for p in L.projects(self.root)}
+        self.assertEqual(projects["side-projects"]["members"], ["authz", "signal"])
+        self.assertEqual(projects["work"]["members"], ["db", "misc"])
+        with self.assertRaises(L.LayoutError):
+            L.remove_project(self.root, "@work")  # not empty
+        with self.assertRaises(L.LayoutError):
+            L.assign_project(self.root, "db", "@nope")
+
+    def test_make_with_project_and_resolve(self):
+        L.make_project(self.root, "work")
+        L.make_project(self.root, "personal", title="Personal")
+        L.make_folder(self.root, "home/garden", title="Garden", project="personal")
+        self.assertEqual(L.read_json(self.root / "home/folder.json"), {"project": "personal"})
+        L.make_subject(self.root, "running", project="@personal")
+        self.assertEqual(L.read_json(self.root / "running/subject.json")["project"], "personal")
+        L.make_subject(self.root, "home/kitchen", project="personal")  # an existing family of that project
+        with self.assertRaises(L.LayoutError):
+            L.make_subject(self.root, "db/billing", project="personal")  # db is in work
+        self.assertFalse((self.root / "db/billing").exists())  # refused before anything was created
+        self.assertEqual(L.resolve(self.root, "@personal")["title"], "Personal")
+        self.assertEqual(L.resolve(self.root, "Personal", "project")["id"], "personal")
+        with self.assertRaises(L.LayoutError):
+            L.resolve(self.root, "@personal", "folder")
+        L.set_meta(self.root, "@personal", title="Home life", icon="🏡")
+        self.assertEqual(L.find_project(self.root, "personal")["title"], "Home life")
+        with self.assertRaises(L.LayoutError):
+            L.set_meta(self.root, "@personal", order=2)
+
+    def test_a_new_default_never_moves_existing_folders(self):
+        L.make_project(self.root, "work")  # the default: holds db, authz and misc without writing a thing
+        L.make_project(self.root, "spare", default=True)  # pins them to work first
+        self.assertEqual(L.find_project(self.root, "work")["members"], ["db", "authz", "misc"])
+        self.assertEqual(L.read_json(self.root / "misc/folder.json").get("project"), "work")
+        L.make_folder(self.root, "fresh")  # a new family goes to the new default
+        self.assertEqual(L.find_project(self.root, "spare")["members"], ["fresh"])
+        L.assign_project(self.root, "fresh", "work")
+        self.assertEqual(L.remove_project(self.root, "spare"), {"path": "@spare"})
+        self.assertTrue(L.find_project(self.root, "work")["default"])  # the default falls back to the first one
+
+    def test_bad_registry_entries_are_skipped(self):
+        L.write_json(self.root / "projects.json", {"default": "gone", "projects": [
+            {"id": "Bad Id"}, {"id": "ok", "title": "OK"}, "junk", {"id": "ok"}]})
+        reg = L.read_projects(self.root)
+        self.assertEqual(([p["id"] for p in reg["projects"]], reg["default"]), (["ok"], None))
+        self.assertEqual({c["project"] for c in L.tree(self.root)["children"]}, {""})  # no default: no project
+
+
+class Outline(Fixture):
+    def test_sections_and_kicker_from_the_source(self):
+        d = self.root / "db/interaction"
+        (d / "QA-PASS-3.src.html").write_text(
+            '<header><div class="kicker">v3 · conversation</div><h1>Q&amp;A pass 3 — x</h1></header>'
+            '<!-- <h2 id="p9">a comment</h2> -->'
+            '<h2 id="p1"><span class="n">01</span>We go with the <b>Flex</b> tier</h2>'
+            '<h2>no id: not a section</h2><h2 id="need"><span class="n">02</span>What I need from you</h2>',
+            encoding="utf-8")
+        entry = next(p for p in P.list_passes(d) if p["n"] == 3)
+        kicker, sections = P.outline(d, entry)
+        self.assertEqual(kicker, "v3 · conversation")
+        self.assertEqual(sections, (("p1", "01", "We go with the Flex tier"), ("need", "02", "What I need from you")))
+
+
 if __name__ == "__main__":
     unittest.main()
