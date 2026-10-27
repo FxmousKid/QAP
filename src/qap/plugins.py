@@ -209,7 +209,8 @@ class Plugin:
 
     def register_route(self, method: str, path: str, handler: Callable[[dict], dict]) -> None:
         """handler(body) -> dict, served at /api/plugins/<id>/<path>. GET gets the query string as body.
-        POSTs pass the same guards as the dashboard's own writes (this origin only, JSON body)."""
+        POSTs pass the same guards as the dashboard's own writes (this origin only, JSON body). A GET must not
+        change anything: any web page can make the browser send one (it cannot read the answer)."""
         method = method.upper()
         if method not in ("GET", "POST") or not ROUTE.match(path) or path.split("/")[0] in RESERVED_ROUTES:
             raise PluginError(f"{self.manifest.id}: bad route {method} {path!r}")
@@ -241,7 +242,11 @@ class Plugin:
         def loop() -> None:
             last = time.monotonic()
             while not stop.wait(self.app.tick):
-                period = seconds() if callable(seconds) else seconds
+                try:
+                    period = seconds() if callable(seconds) else seconds
+                except Exception as e:  # e.g. an unreadable data.json: skip this tick, keep the thread alive
+                    self.log(f"interval: {e}")
+                    period = 0
                 if period and time.monotonic() - last >= period:
                     last = time.monotonic()
                     self.app._safely(self.manifest.id, "interval", fn)

@@ -146,6 +146,10 @@ class Store:
     def has_commits(self) -> bool:
         return self.has_ref("HEAD")
 
+    def related(self, ref: str) -> bool:
+        """Whether HEAD and ref share history (they do not after `init` met a remote with its own past)."""
+        return self.git("merge-base", "HEAD", ref, check=False).returncode == 0
+
     def remote_url(self, name: str | None = None) -> str | None:
         proc = self.git("remote", "get-url", name or self.remote, check=False)
         return proc.stdout.strip() if proc.returncode == 0 else None
@@ -280,6 +284,7 @@ class Store:
         if not self.has_commits():  # nothing here yet (not even a file): take the remote's history as is
             self.git("checkout", "--quiet", "-B", self.branch(), "--track", ref)
             return behind
+        unrelated = unrelated or not self.related(ref)
         if self.settings.get("sync_method") == "rebase" and ahead and not unrelated:
             args = ["rebase", "--quiet", ref]
         else:
@@ -446,6 +451,7 @@ class Store:
     def conflict_text(self, conflict: dict, words: list[str] | None = None) -> str:
         files = conflict["files"]
         listed = "\n".join(f"    {f}" for f in files[:12]) + (f"\n    … and {len(files) - 12} more" if len(files) > 12 else "")
+        flag = " --allow-unrelated-histories" if conflict.get("trigger") == "init" else ""
         head = ("git: " + "; ".join(words) + "\n") if words else ""
         return (f"{head}git: CONFLICT with {conflict['ref']}: this machine and the remote both changed\n{listed}\n"
                 f"  Nothing was pushed and your files are as they were (the merge was undone).\n"
@@ -453,7 +459,7 @@ class Store:
                 f"    qap storage git resolve --mine     keep this machine's version of those files\n"
                 f"    qap storage git resolve --theirs   keep the remote's version\n"
                 f"  (the version not kept stays in the history), or merge by hand in {self.root}\n"
-                f"  (git merge {conflict['ref']}, fix, commit) and run `qap storage git sync`.")
+                f"  (git merge{flag} {conflict['ref']}, fix, commit) and run `qap storage git sync`.")
 
     def resolve(self, keep: str) -> dict:
         """Finish a recorded conflict by keeping one side, file by file; the other side stays in history."""
@@ -467,7 +473,8 @@ class Store:
             ref = self.remote_ref()
             if not self.has_ref(ref):
                 raise GitError(f"{ref} does not exist: nothing to resolve against")
-            proc = self.git("merge", "--quiet", "--no-edit", ref, check=False, sign=True)
+            proc = self.git("merge", "--quiet", "--no-edit", ref,
+                            *([] if self.related(ref) else ["--allow-unrelated-histories"]), check=False, sign=True)
             files = self.unmerged() if proc.returncode else []
             if proc.returncode and not files:
                 self.git("merge", "--abort", check=False)

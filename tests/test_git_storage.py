@@ -186,6 +186,20 @@ class GitStorage(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("from b", git(self.remote, "show", f"main:{page}"))
 
+    def test_init_meeting_a_remote_with_its_own_past_and_a_conflict(self):
+        self.q(self.a, "storage", "git", "init", "--remote", self.url)
+        b = self.machine("b")  # its own billing subject, its own pass 1: unrelated histories, same paths
+        (b / "work/billing/QA-PASS-1.src.html").write_text(SOURCE.format(n=1, text="b's own"), encoding="utf-8")
+        code, out = self.q(b, "storage", "git", "init", "--remote", self.url)
+        self.assertEqual(code, 1)
+        self.assertIn("--allow-unrelated-histories", out["text"])
+        self.assertIn("work/billing/QA-PASS-1.src.html", out["conflict"]["files"])
+        code, out = self.q(b, "storage", "git", "resolve", "--mine")
+        self.assertEqual(code, 0, out)
+        self.assertIn("b's own", git(self.remote, "show", "main:work/billing/QA-PASS-1.src.html"))
+        self.assertEqual(self.q(self.a, "storage", "git", "sync")[0], 0)  # and the first machine follows
+        self.assertIn("b's own", (self.a / "work/billing/QA-PASS-1.src.html").read_text())
+
     # ------------------------------------------------------------------ edges
     def test_a_content_root_inside_another_repository(self):
         parent = self.base / "parent"
