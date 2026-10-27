@@ -68,7 +68,7 @@ class Hello(Plugin):
     def onload(self):
         self.add_settings(Setting("greeting", "Greeting", "hello"))
         self.add_command("say", "Say it", self.say,
-                         args=[(["--name"], {"default": "world"})])   # qap hello say --name Iyan
+                         args=[(["--name"], {"default": "world"})])   # qap hello say --name Ada
         self.register_event("pass_built", self.built)
 
     def say(self, opts):
