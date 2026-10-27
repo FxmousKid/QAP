@@ -189,6 +189,18 @@ def built_for(src: Path) -> Path:
     return src.with_name(src.name[: -len(".src.html")] + ".html")
 
 
+def unbuilt_sources(subject_dir: Path) -> list[Path]:
+    """QA-PASS-N.src.html files (numbered, untagged) whose QA-PASS-N.html is missing, oldest first: a pass not built
+    yet, or a page a backup left out (git-storage keeps the sources and rebuilds the pages)."""
+    found = []
+    for p in subject_dir.iterdir() if subject_dir.is_dir() else []:
+        info = parse_name(p.name)
+        if info and info["ext"] == "src.html" and info["n"] is not None and not info["tag"] \
+                and not built_for(p).exists():
+            found.append((info["n"], p))
+    return [p for _, p in sorted(found)]
+
+
 def page_project(path: Path) -> str:
     """The <meta name="qa-project"> of a page or source ('' when absent)."""
     try:

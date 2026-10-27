@@ -110,8 +110,9 @@ $Q carry interaction [--skip p7,p8] [--stars stars.txt] --json
                                        # starts the next pass: carry.py from the latest source, or the
                                        # template (qa-project and number filled in) for pass 1
 $Q build interaction --check           # build.py on the latest source (--pass N for another), then check.py
-$Q build interaction --all             # rebuild every page that has a source; keeps a page whose rebuild
-                                       # fails check (old-format sources)
+$Q build interaction --all             # rebuild every page that has a source (and build missing ones); keeps
+                                       # a page whose rebuild fails check (old-format sources). No subject:
+                                       # every subject of the content root
 $Q place ~/somewhere/choices db-migration-v3/billing --create --title "Billing" --json
                                        # move passes made elsewhere in; leaves a symlink at the old place
 $Q mkdir / mv / rename / icon / rmdir  # organise (the dashboard does the same: drag a tile onto a folder)

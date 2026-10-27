@@ -4,6 +4,8 @@ and one subject (Payment retries) with three real passes (pass 1 written here, p
 
 Usage: python3 examples/make_demo.py <new content root> [<qap>]     (qap defaults to this repo's bin/qap)
 Then:  bin/qap serve --root <new content root> --open
+The git screenshots: `git init --bare /tmp/backup.git`, then `bin/qap storage git init --remote file:///tmp/backup.git
+--root <new content root>` before serving.
 The chart needs matplotlib, which `uv run --with matplotlib` fetches on the fly.
 """
 from __future__ import annotations

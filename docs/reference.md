@@ -81,7 +81,7 @@ its folder name, title or qa-project when that is unique.
 | `qap next <subject>` | Shows the next pass number, its `.src.html` / `.html` paths, and the source it carries from |
 | `qap new-subject <folder>/<subject> --title --icon --qa-project [--project]` | Creates a subject with its `subject.json` and `img/`. `--project`: the project a new top-level folder joins (an existing one must already be in it) |
 | `qap carry <subject> [--skip p7,p8] [--stars file] [--ai v\|Name\|Model]` | Starts the next pass: `carry.py` from the latest source, or the template for pass 1 |
-| `qap build <subject> [--pass N \| --all] [--check]` | Runs `build.py`. `--all` rebuilds every page that has a source and keeps the old page when the new one fails `check.py` |
+| `qap build <subject> [--pass N \| --all] [--check]` | Runs `build.py`. `--all` rebuilds every page that has a source, builds the missing pages of `QA-PASS-N.src.html` files, and keeps the old page when the new one fails `check.py`. `qap build --all` without a subject does it for every subject |
 | `qap check <subject> [--pass N \| --all]` | Runs `check.py` |
 | `qap mkdir <path> --title --icon [--project]` | Creates a folder |
 | `qap mv <src> <dest>` | Moves a subject or folder into a folder (`/` is the top level), to a new path (move and rename), or into a project (`@id`) |
@@ -94,7 +94,7 @@ its folder name, title or qa-project when that is unique.
 | `qap place <file\|dir> <subject> [--as N] [--create] [--no-link]` | Moves a pass, or a whole old `choices/` folder, into a subject and leaves a symlink behind |
 | `qap serve [--port N] [--open]` | Starts the dashboard on 127.0.0.1 |
 | `qap plugins [list \| enable \| disable \| config \| install \| remove]` | Plugins: on / off, settings, install from a folder or a git URL ([plugins.md](plugins.md)) |
-| `qap storage git init --remote <url> [--branch main]` | Backs the content root up in a git remote, or restores a backup into an empty content root |
+| `qap storage git init --remote <url> [--branch main]` | Backs the content root up in a git remote, or restores a backup into an empty content root (and rebuilds its pages) |
 | `qap storage git sync [-m MSG] [--no-push]` | Commits everything, pulls (merge or rebase), pushes. Never forced |
 | `qap storage git status [--fetch]` / `log [-n N]` | What is not backed up yet, a conflict, warnings / the latest commits |
 | `qap storage git commit [-m MSG]` | Commits here only, without the network |

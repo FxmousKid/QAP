@@ -107,6 +107,26 @@ class CLI(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("cannot read", out["error"])
 
+    def test_build_all_covers_the_whole_root_and_missing_pages(self):
+        page = ('<!doctype html><html><head><meta name="qa-pass" content="{n}"><title>T</title></head><body><main>\n'
+                '<h1>Q&amp;A pass {n}</h1>\n</main><footer></footer></body></html>\n')
+        for path in ("work/billing", "home/roof"):
+            self.q("new-subject", path, "--title", path.split("/")[1].title())
+            for n in (1, 2):
+                (self.root / path / f"QA-PASS-{n}.src.html").write_text(page.format(n=n), encoding="utf-8")
+        code, out = self.q("build", "billing", "--pass", "1")
+        self.assertEqual(code, 0, out)
+        code, out = self.q("build", "--all")  # no subject: every subject; missing pages are built too
+        self.assertEqual((code, out["subject"]), (0, ""), out)
+        self.assertEqual(sorted(Path(r["html"]).relative_to(self.root).as_posix() for r in out["results"]),
+                         ["home/roof/QA-PASS-1.html", "home/roof/QA-PASS-2.html",
+                          "work/billing/QA-PASS-1.html", "work/billing/QA-PASS-2.html"])
+        self.assertTrue(all((self.root / p / f"QA-PASS-{n}.html").is_file()
+                            for p in ("work/billing", "home/roof") for n in (1, 2)))
+        self.assertEqual(sum(r["reason"].startswith("built") for r in out["results"]), 3)  # missing: built anyway
+        code, out = self.q("build", "--all")  # a page that exists is kept when its rebuild has check problems
+        self.assertEqual({r["replaced"] for r in out["results"]}, {False})
+
     def test_config_reports_root(self):
         code, out = self.q("config")
         self.assertEqual((code, out["content_root"], out["content_root_from"]), (0, str(self.root), "--root"))

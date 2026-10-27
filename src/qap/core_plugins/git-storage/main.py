@@ -39,9 +39,15 @@ class GitStorage(Plugin):
                     "{{subjects}} {{trigger}} (build, interval, startup, manual, init, resolve)."),
             Setting("date_format", "Date format", "%Y-%m-%d %H:%M", "strftime codes, for {{date}}."),
             Setting("list_files_in_body", "List the files in the commit body", True, ""),
-            Setting("sign_commits", "Sign commits", "inherit",
-                    "inherit: as your git config says (commit.gpgsign). off: qap's commits are not signed, so a "
-                    "background sync never waits on a signing prompt.", choices=("inherit", "off")),
+            Setting("sign_commits", "Sign automatic commits", "off",
+                    "off: the commits qap makes on its own (after a build, on the interval, at startup, from the "
+                    "dashboard or an agent's --json) are not signed, so a background sync never waits on a signing "
+                    "prompt. inherit: as your git config says (commit.gpgsign). Commands you type in a terminal "
+                    "(qap storage git commit, sync, resolve, init) always follow your git config.",
+                    choices=("off", "inherit")),
+            Setting("backup_built_pages", "Back up the built pages", False,
+                    "Off: a QA-PASS-N.html beside its QA-PASS-N.src.html is left out (.gitignore) and rebuilt after a "
+                    "restore or a pull; pages without a source are always backed up. On: every page goes in."),
         )
         self.add_command("init", "Set up the git backup", self.cmd_init, cli=GROUP + ("init",), args=[
             (["--remote"], {"required": True,
@@ -107,7 +113,7 @@ class GitStorage(Plugin):
         return {"commits": commits, "text": text or "no commit yet"}
 
     def cmd_commit(self, opts) -> dict:
-        s = self.store()
+        s = self.store(opts.interactive)  # from a terminal it signs as your git config says
         try:
             s.require_initialized()
             with s.locked():

@@ -43,8 +43,9 @@ def check(page: Path) -> dict:
 
 
 def rebuild_safely(src: Path) -> dict:
-    """Rebuild an existing page from its source, keeping the old page when the new one has check PROBLEMs
-    (old-format sources) or when the build fails. Used by `qap build --all`."""
+    """Rebuild a page from its source, keeping the old page when the new one has check PROBLEMs (old-format
+    sources) or when the build fails. A missing page is written either way (nothing to keep), with its problems
+    listed, as `qap build` would. Used by `qap build --all`."""
     out = P.built_for(src)
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / out.name
@@ -52,14 +53,19 @@ def rebuild_safely(src: Path) -> dict:
         if not result["ok"]:
             return {**result, "html": str(out), "replaced": False, "reason": "build failed"}
         verdict = check(candidate)
-        if not verdict["ok"]:
+        if not verdict["ok"] and out.is_file():
             return {**result, "html": str(out), "replaced": False,
                     "reason": f"kept the old page: {len(verdict['problems'])} check problem(s)",
                     "problems": verdict["problems"]}
+        if not verdict["ok"]:
+            out.write_bytes(candidate.read_bytes())
+            return {**result, "html": str(out), "replaced": True,
+                    "reason": f"built, with {len(verdict['problems'])} check problem(s)", "problems": verdict["problems"]}
         same = out.is_file() and out.read_bytes() == candidate.read_bytes()
+        reason = "unchanged" if same else "rebuilt" if out.is_file() else "built"
         if not same:
             out.write_bytes(candidate.read_bytes())
-        return {**result, "html": str(out), "replaced": not same, "reason": "unchanged" if same else "rebuilt"}
+        return {**result, "html": str(out), "replaced": not same, "reason": reason}
 
 
 def carry(prev: Path, nxt: Path, n: int, skip: str = "", stars: str = "", ai: str = "") -> dict:

@@ -1,7 +1,8 @@
 """git-storage end to end, against LOCAL bare repositories in a temp dir (file:// remotes): set up, restore, the
 build / startup / interval triggers, a conflict (stop, show, nothing pushed, resolve), a content root nested in
-another repository, an unreachable remote, the dashboard route. Git runs with a throwaway global config
-(GIT_CONFIG_GLOBAL), so your identity, signing and hooks are never used and nothing leaves the temp dir."""
+another repository, an unreachable remote, the dashboard route, built pages left out and rebuilt, signing. Git runs
+with a throwaway global config (GIT_CONFIG_GLOBAL), so your identity, signing and hooks are never used and nothing
+leaves the temp dir."""
 from __future__ import annotations
 
 import contextlib
@@ -95,9 +96,10 @@ class GitStorage(unittest.TestCase):
         code, out = self.q(self.a, "build", "billing")
         self.assertEqual(code, 0, out)
         self.assertTrue(out["plugins"]["git-storage"]["ok"], out)
-        self.assertEqual(self.remote_log()[0], "qap build: work/billing (2 files, " +
-                         self.remote_log()[0].split(", ")[-1])  # the source and the built page
-        self.assertIn("QA-PASS-1.html", git(self.remote, "ls-tree", "-r", "--name-only", "main"))
+        self.assertEqual(self.remote_log()[0], "qap build: work/billing (1 file, " +
+                         self.remote_log()[0].split(", ")[-1])  # the source: the built page is left out
+        self.assertTrue((self.a / "work/billing/QA-PASS-1.html").is_file())
+        self.assertNotIn("QA-PASS-1.html", git(self.remote, "ls-tree", "-r", "--name-only", "main").split())
 
         # another machine pushes; "startup" (qap serve) brings it in
         b = self.base / "b"
@@ -331,10 +333,77 @@ class GitStorage(unittest.TestCase):
             app.unload_all()
 
     def test_never_force_pushes(self):
-        code = STORE.read_text(encoding="utf-8")
-        self.assertNotIn("--force", code)
-        self.assertNotIn('"-f"', code)
-        self.assertNotIn("+HEAD", code)
+        for line in STORE.read_text(encoding="utf-8").splitlines():
+            if "--force" in line or '"-f"' in line or "+HEAD" in line:
+                self.assertIn('self.git("add", "--force"', line)  # only git add -f: pages kept despite .gitignore
+
+    # ------------------------------------------------------------------ built pages, signing
+    def test_built_pages_are_left_out_and_rebuilt_after_a_restore_or_a_pull(self):
+        subject = self.a / "work/billing"
+        self.assertEqual(self.q(self.a, "build", "billing")[0], 0)
+        (subject / "QA-PASS-7.html").write_text("<p>a page without its source</p>\n", encoding="utf-8")
+        (subject / "QA-PASS-42-org-units.html").write_text("<p>an odd name</p>\n", encoding="utf-8")
+        code, out = self.q(self.a, "storage", "git", "init", "--remote", self.url)
+        self.assertEqual(code, 0, out)
+        files = git(self.remote, "ls-tree", "-r", "--name-only", "main").split()
+        self.assertIn("work/billing/QA-PASS-1.src.html", files)
+        self.assertNotIn("work/billing/QA-PASS-1.html", files)  # rebuilt from its source
+        self.assertIn("work/billing/QA-PASS-7.html", files)  # no source: kept
+        self.assertIn("work/billing/QA-PASS-42-org-units.html", files)
+
+        b = self.machine("b", with_subject=False)
+        code, out = self.q(b, "storage", "git", "init", "--remote", self.url)
+        self.assertEqual((code, out.get("restored"), out["rebuilt"]["built"]), (0, True, 1), out)
+        self.assertEqual((b / "work/billing/QA-PASS-1.html").read_bytes(), (subject / "QA-PASS-1.html").read_bytes())
+        self.assertEqual(git(b, "status", "--porcelain"), "")
+
+        # a new pass built on a, pulled by b: b builds its page
+        (subject / "QA-PASS-2.src.html").write_text(SOURCE.format(n=2, text="second"), encoding="utf-8")
+        self.assertEqual(self.q(self.a, "build", "billing")[0], 0)  # the build syncs
+        code, out = self.q(b, "storage", "git", "sync")
+        self.assertEqual((code, out["rebuilt"]["built"]), (0, 1), out)
+        self.assertIn("rebuilt 1 page", out["text"])
+        self.assertTrue((b / "work/billing/QA-PASS-2.html").is_file())
+        code, out = self.q(b, "list", "--passes")
+        self.assertEqual([p["label"] for p in out["tree"]["children"][0]["children"][0]["passes"]],
+                         ["1", "2", "7", "42-org-units"])
+
+        # backup_built_pages on: every page goes in
+        self.q(self.a, "plugins", "config", "git-storage", "backup_built_pages", "true")
+        self.assertEqual(self.q(self.a, "storage", "git", "sync")[0], 0)
+        self.assertIn("work/billing/QA-PASS-2.html", git(self.remote, "ls-tree", "-r", "--name-only", "main").split())
+
+    def test_an_existing_gitignore_gets_the_built_pages_rule(self):
+        (self.a / ".gitignore").write_text("*.bak\n", encoding="utf-8")
+        code, out = self.q(self.a, "storage", "git", "init", "--remote", self.url)
+        self.assertEqual(code, 0, out)
+        text = (self.a / ".gitignore").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("*.bak\n") and "QA-PASS-*.html" in text.splitlines(), text)
+
+    def test_background_commits_are_not_signed_by_default(self):
+        # commit.gpgsign on, and a signing program that always fails: a signed commit cannot be made here
+        with open(os.environ["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8") as f:
+            f.write("[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n")
+        code, out = self.q(self.a, "storage", "git", "init", "--remote", self.url)  # --json: no terminal
+        self.assertEqual(code, 0, out)
+        L.make_folder(self.a, "archive", title="Archive")
+        plugin = self.plugin(self.a)
+        with contextlib.redirect_stderr(io.StringIO()):
+            plugin.on_interval()
+        self.assertTrue(self.remote_log()[0].startswith("qap interval: archive"))
+
+        store = plugin.store(interactive=True)  # a command typed in a terminal follows commit.gpgsign
+        L.make_folder(self.a, "later", title="Later")
+        with self.assertRaises(Exception) as caught:
+            store.commit("manual")
+        self.assertIn("gpg", str(caught.exception).lower())
+        self.assertIsNotNone(plugin.store(interactive=True).sync("interval")["committed"])  # automatic: unsigned
+        self.q(self.a, "plugins", "config", "git-storage", "sign_commits", "inherit")
+        L.make_folder(self.a, "even-later", title="Even later")
+        result = self.plugin(self.a).store().sync("interval")
+        self.assertFalse(result["ok"])
+        self.assertIn("sign_commits off", result["error"])
+        plugin.app.unload_all()
 
 
 if __name__ == "__main__":

@@ -416,31 +416,36 @@ def cmd_carry(args) -> None:
 
 def _sources(root: Path, node: dict, n: int | None, every: bool) -> list[Path]:
     d = L.abs_path(root, node["path"])
-    if every:
-        return [d / p["src"] for p in node["passes"] if p["src"]]
+    if every:  # every page that has a source, and every QA-PASS-N.src.html whose page is missing
+        return [d / p["src"] for p in node["passes"] if p["src"]] + P.unbuilt_sources(d)
     return [P.source_for(d, n)]
 
 
 def cmd_build(args) -> None:
     root = root_of(args)
-    node = pick_subject(args, args.subject)
+    whole = args.all and not args.subject  # `qap build --all`: every subject of the content root
+    nodes = L.subjects(root) if whole else [pick_subject(args, args.subject)]
     results = []
-    for src in _sources(root, node, args.n, args.all):
-        r = skill.rebuild_safely(src) if args.all else skill.build(src)
-        if args.check and r["ok"] and not args.all:
-            r["check"] = skill.check(Path(r["html"]))
-        results.append(r)
+    for node in nodes:
+        for src in _sources(root, node, args.n, args.all):
+            r = skill.rebuild_safely(src) if args.all else skill.build(src)
+            if args.check and r["ok"] and not args.all:
+                r["check"] = skill.check(Path(r["html"]))
+            results.append(r)
     lines = []
     for r in results:
         if args.all:
-            lines.append(f"{Path(r['html']).name:<24} {r['reason']}")
+            page = Path(r["html"])
+            name = page.relative_to(root).as_posix() if whole and page.is_relative_to(root) else page.name
+            lines.append(f"{name:<24} {r['reason']}")
         else:
             lines.append(r["output"])
             if "check" in r:
                 lines.append(r["check"]["output"])
     failed = [r for r in results if not r["ok"] or (r.get("check") and not r["check"]["ok"])]
-    data = {"subject": node["path"], "results": results}
-    heard = args.app.emit("pass_built", {"subject": node["path"], "ok": not failed, "source": "cli",
+    subject = "" if whole else nodes[0]["path"]
+    data = {"subject": subject, "results": results}
+    heard = args.app.emit("pass_built", {"subject": subject, "ok": not failed, "source": "cli",
                                          "pages": [r["html"] for r in results if r["ok"]],
                                          "interactive": prompt.interactive(args)}) if hasattr(args, "app") else {}
     if heard:
@@ -573,8 +578,9 @@ def parser(app: plugins.App | None = None) -> argparse.ArgumentParser:
         g = p.add_mutually_exclusive_group()
         g.add_argument("--pass", dest="n", type=int, help="pass number (default: the latest)")
         g.add_argument("--all", action="store_true",
-                       help="every pass" + (" that has a source; keeps the old page when the rebuilt one has "
-                                            "check problems" if name == "build" else ""))
+                       help="every pass" + (" that has a source, and missing pages (no subject: the whole content "
+                                            "root); keeps the old page when the rebuilt one has check problems"
+                                            if name == "build" else ""))
         if name == "build":
             p.add_argument("--check", action="store_true", help="run check.py after the build")
 

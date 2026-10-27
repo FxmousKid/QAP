@@ -24,6 +24,7 @@ into, and a button back to where you clicked. CSS, JS and images are inlined: th
 qap new-subject payments/retries --title "Payment retries" --icon chart --qa-project retries
 qap carry retries              # start the next pass: fold the last round, add the new round's placeholders
 qap build retries --check      # build the page (links, labels, inlined images), then lint it
+qap build --all                # rebuild every page of every subject (a restore, a new page script)
 qap list                       # projects, families, subjects and their passes
 qap serve --open               # the dashboard
 ```
@@ -51,7 +52,8 @@ A project is an entry of `projects.json` at the content root, and a family joins
 ## Search
 
 Fuzzy search over every project, family, subject and pass (titles, folder names, each pass's heading and section
-titles), top right on every view and just left of `‹` on a subject. `⌘K` (`Ctrl+K`) anywhere, `/` outside a subject.
+titles), at the far right of the top bar on every view and just left of `‹` on a subject. `⌘K` (`Ctrl+K`)
+anywhere, `/` outside a subject.
 Empty, it shows the home; typing ranks the same boxes, with project › family › subject under each. `Enter` opens,
 at the matching section when a section matched.
 
@@ -84,15 +86,34 @@ qap storage git sync                                            # commit, pull a
 - **Automatic**: once set up, it commits, pulls and pushes after each `qap build`, when `qap serve` starts, and
   every 10 minutes while it runs. The dashboard's top bar shows `git ✓`, `git ● 3 changed` or `git ⚠ conflict`.
   The pill opens a Git backup view with Sync now and the latest commits.
-- **Restore** on another machine: run the same `init` on an empty content root.
+- **Restore** on another machine: run the same `init` on an empty content root. It brings the sources back and
+  rebuilds their pages.
 - **Never force-pushes.** If this machine and the remote changed the same file, the merge is undone, so no
   conflict markers end up in a pass. The files are listed and automatic syncs pause. You then choose with
   `qap storage git resolve --mine` or `--theirs` (the other version stays in the history), or you merge by hand.
 - **Credentials stay with git**: your ssh agent or credential helper. `qap` never stores one. Background syncs
   have no terminal, so a passphrase prompt fails instead of hanging.
 - **The content root gets its own repository**, even inside another repository. It never touches that other one.
-- **Settings**: `qap plugins config git-storage` sets the interval, the commit message template (`{{date}}`,
-  `{{hostname}}`, `{{fileCount}}`, `{{subjects}}`, `{{trigger}}`…), merge or rebase, push off, and commit signing.
+- **Settings**: `qap plugins config git-storage` (or the Plugins page) sets the interval, the commit message
+  template (`{{date}}`, `{{hostname}}`, `{{fileCount}}`, `{{subjects}}`, `{{trigger}}`…), merge or rebase, push
+  off, and the two defaults below.
+
+![The Git backup view: the remote, the last sync, and the latest commits; the git pill in the top bar](docs/img/git-backup.png)
+
+The defaults:
+
+- **Built pages stay out of the backup.** A `QA-PASS-N.html` next to its `QA-PASS-N.src.html` is rebuilt from it,
+  so the `.gitignore` leaves it out. After a restore or a pull, qap rebuilds the pages of the sources that came
+  in, and `qap build --all` rebuilds every page by hand. A page without its source is always backed up.
+  `backup_built_pages true` backs up every page.
+- **Automatic commits are not signed.** Your git config may sign commits (`commit.gpgsign`), and a background
+  sync has no terminal to answer the prompt. The commits qap makes on its own (after a build, on the interval, at
+  startup, from the dashboard) are unsigned. The commands you type (`qap storage git commit`, `sync`, `resolve`)
+  follow your git config. `sign_commits inherit` signs every commit.
+- **Symlinks stay links.** A link that points outside the content root is backed up as a link, not as the file;
+  `qap storage git status` warns about each one.
+- **One remote per content root**, and no sync when `qap serve` stops: the next start or interval catches up.
+  One remote per project comes later.
 
 ## Plugins
 
@@ -100,7 +121,7 @@ The git backup is the first plugin. Plugins follow Obsidian's model: a folder wi
 `main.py` whose `onload()` registers commands, events (`pass_built`, `content_changed`, `startup`), routes,
 intervals and a settings tab, and an optional `web/main.js` for the dashboard (status items, views, ⧉ menu
 commands). Core plugins ship with `qap`. Community plugins go in `~/.config/qap/plugins` and stay off until you
-turn them on.
+turn them on. A community registry to browse and install from comes later.
 
 ```bash
 qap plugins                                         # what is installed, on or off

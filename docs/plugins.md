@@ -151,8 +151,11 @@ and `store.py` for the git work. What it registers:
   - `startup`: it syncs when `qap serve` starts.
 - **An interval**: it syncs every `auto_sync_minutes` while `qap serve` runs.
 - **A route**: `GET status`.
-- **Nine settings**.
+- **Ten settings**.
 - **A dashboard part**: a status pill, a "Git backup" view and two ⧉ commands.
+
+What it backs up: the `.gitignore` it writes leaves out the built pages that have a source; `store.py` adds the
+other pages with `git add -f` and rebuilds the pages of the sources a restore or a pull brings in (`qap.skill`).
 
 It stays inert until `qap storage git init` has run for the current content root, so having it on costs
 nothing. How to use it is in the [README](../README.md#store-your-passes-in-git).

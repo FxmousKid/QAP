@@ -8,6 +8,14 @@ push. Three rules hold everywhere:
   - credentials are git's business (your ssh agent, your credential helper): qap never sees or stores one.
     Background syncs run without a terminal, so a passphrase prompt fails instead of hanging.
 
+What is backed up: everything but system files and the built pages. A QA-PASS-N.html beside its QA-PASS-N.src.html
+is rebuilt from it, so the .gitignore leaves it out; a page without its source (or with another name) is added
+with `git add -f`. After a restore or a pull, the pages of the sources that came in are rebuilt here.
+
+Signing: the commits qap makes on its own (after a build, on the interval, at startup, and anything run without a
+terminal: the dashboard, an agent's --json) are not signed unless `sign_commits` is `inherit`; the commands you
+type in a terminal follow your git config (commit.gpgsign).
+
 GIT_CEILING_DIRECTORIES pins every git call to the content root itself, so a content root that sits inside
 another repository (~/Desktop/Dev/ai/QAP/contents inside ~/Desktop/Dev/ai) never touches that repository; the
 variables a git hook exports (GIT_DIR, GIT_INDEX_FILE, …) are dropped for the same reason. Your global git
@@ -20,6 +28,7 @@ import contextlib
 import functools
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -27,7 +36,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from qap import layout as L
+from qap import layout as L, skill
 
 try:
     import fcntl
@@ -37,15 +46,26 @@ except ImportError:  # not POSIX: syncs are not serialised across processes
 STATE_FILE = "qap-storage.json"  # in .git/: never committed, one per repository
 LOCK_FILE = "qap-storage.lock"
 BIG_FILE = 50 * 1024 * 1024  # GitHub warns at 50 MB and refuses 100 MB
-GITIGNORE = """\
-# Written by `qap storage git init`. qap never rewrites this file: edit it freely.
+BUILT_RULE = "QA-PASS-*.html"
+BUILT_BLOCK = f"""\
+# Built pages: QA-PASS-N.html is rebuilt from QA-PASS-N.src.html (`qap build --all`), so it is left out. A page
+# without its source is still backed up (qap adds it with `git add -f`).
+{BUILT_RULE}
+!QA-PASS-*.src.html
+"""
+GITIGNORE = f"""\
+# Written by `qap storage git init`; qap leaves it alone afterwards: edit it freely.
 # Not backed up: system files and caches.
 .DS_Store
 Thumbs.db
 __pycache__/
 *.pyc
 *.tmp
-"""
+{BUILT_BLOCK}"""
+PAGE = re.compile(r"^QA-PASS-.*\.html$")
+NUMBERED_PAGE = re.compile(r"^QA-PASS-(\d+)\.html$")
+NUMBERED_SOURCE = re.compile(r"(?:^|/)QA-PASS-\d+\.src\.html$")
+AUTOMATIC = ("build", "interval", "startup")  # the triggers that never come from you typing a command
 
 
 class GitError(Exception):
@@ -89,12 +109,22 @@ class Store:
         self.settings = settings or {}
         self.interactive = interactive
         self.timeout = timeout
+        self.trigger = "manual"
+
+    @property
+    def background(self) -> bool:
+        """No one at a terminal to answer a prompt: an automatic trigger, the dashboard, an agent (--json)."""
+        return self.trigger in AUTOMATIC or not self.interactive
+
+    def unsigned(self) -> bool:
+        """Whether qap's commits skip signing: background ones, unless sign_commits is inherit."""
+        return self.background and self.settings.get("sign_commits", "off") == "off"
 
     # ------------------------------------------------------------------ running git
     def git(self, *args: str, check: bool = True, network: bool = False, sign: bool = False,
             cwd: Path | None = None, ceiling: bool = True) -> subprocess.CompletedProcess:
         pre = list(PINNED)
-        if sign and self.settings.get("sign_commits") == "off":
+        if sign and self.unsigned():
             pre += ["-c", "commit.gpgsign=false"]
         env = {k: v for k, v in os.environ.items() if k not in repo_env_vars()}
         env["GIT_OPTIONAL_LOCKS"] = "0"     # a status poll never holds index.lock against a sync
@@ -262,8 +292,13 @@ class Store:
 
     # ------------------------------------------------------------------ the steps
     def commit(self, trigger: str, message: str | None = None) -> dict | None:
-        """Stage everything (the .gitignore decides what is left out) and commit it. None: nothing to commit."""
+        """Stage everything (the .gitignore decides what is left out, and the pages it must not leave out are
+        added with -f) and commit it. None: nothing to commit."""
+        self.trigger = trigger
         self.git("add", "--all")
+        keep = self.pages_to_keep()
+        for i in range(0, len(keep), 200):
+            self.git("add", "--force", "--", *keep[i:i + 200])
         files = [p for p in self.git("diff", "--cached", "--name-only", "-z").stdout.split("\0") if p]
         if not files:
             return None
@@ -279,8 +314,8 @@ class Store:
             if "identity" in detail.lower() or "user.email" in detail:
                 detail += "\n  set it once: git config --global user.name 'Your Name'; " \
                           "git config --global user.email you@example.com"
-            elif "gpg" in detail.lower() or "sign" in detail.lower():
-                detail += "\n  automatic commits cannot sign without a prompt: " \
+            elif ("gpg" in detail.lower() or "sign" in detail.lower()) and self.background:
+                detail += "\n  a commit made in the background cannot sign without a prompt: " \
                           "qap plugins config git-storage sign_commits off"
             raise GitError(f"git commit failed: {detail}")
         return {"sha": self.short(), "files": len(files), "message": subject}
@@ -317,6 +352,61 @@ class Store:
             if where not in seen:
                 seen.append(where)
         return [w for w in seen if w != "/"] or seen  # top-level files (.gitignore) only when alone
+
+    # ------------------------------------------------------------------ built pages
+    def pages_to_keep(self) -> list[str]:
+        """The QA-PASS pages the .gitignore rule leaves out but that cannot be rebuilt: no QA-PASS-N.src.html beside
+        them (every page, when backup_built_pages is on). Symlinked folders are not followed."""
+        every = bool(self.settings.get("backup_built_pages"))
+        found = []
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            if dirpath != str(self.root) and (".git" in dirnames or ".git" in filenames):
+                dirnames[:] = []  # a repository of its own: git keeps a pointer to it, not its files
+                continue
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for name in filenames:
+                if not PAGE.match(name) or name.endswith(".src.html"):
+                    continue
+                m = NUMBERED_PAGE.match(name)
+                if every or not m or not os.path.isfile(os.path.join(dirpath, f"QA-PASS-{m.group(1)}.src.html")):
+                    found.append(Path(dirpath, name).relative_to(self.root).as_posix())
+        return found
+
+    def rebuild(self, sources: list[str]) -> dict:
+        """Build the pages of the sources that came in (a restore, a pull), as `qap build` built them on the
+        machine that wrote them: the backup holds the sources, not the pages."""
+        if self.settings.get("backup_built_pages") or not sources:
+            return {"built": 0, "failed": []}
+        built, failed = 0, []
+        for rel in sources:
+            src = self.root / rel
+            if not src.is_file():
+                continue
+            try:
+                r = skill.build(src)
+            except OSError as e:  # the skill's scripts are not on this machine
+                return {"built": built, "failed": failed + [rel], "error": str(e)}
+            if r["ok"]:
+                built += 1
+            else:
+                failed.append(rel)
+        return {"built": built, "failed": failed}
+
+    def sources_between(self, old: str | None, new: str = "HEAD") -> list[str]:
+        """The QA-PASS-N.src.html files added or changed from old to new (all of them when old is None)."""
+        if old is None:
+            listed = self.git("ls-files", "-z").stdout.split("\0")
+        else:
+            listed = self.git("diff", "--name-only", "-z", "--diff-filter=AMR", old, new).stdout.split("\0")
+        return [f for f in listed if f and NUMBERED_SOURCE.search(f)]
+
+    @staticmethod
+    def rebuild_words(done: dict) -> list[str]:
+        words = [f"rebuilt {done['built']} page(s)"] if done.get("built") else []
+        if done.get("failed"):
+            words.append(f"{len(done['failed'])} page(s) not rebuilt ({done.get('error') or 'the build failed'}; "
+                         f"qap build --all)")
+        return words
 
     def fetch(self) -> None:
         self.git("fetch", "--quiet", "--prune", self.remote, network=True)
@@ -409,6 +499,7 @@ class Store:
             raise GitError(f"files with unresolved conflicts in {self.root}: resolve them, commit, then sync")
 
     def init(self, url: str, branch: str = "main", remote: str = "origin") -> dict:
+        self.trigger = "init"
         if not self.root.is_dir():
             raise GitError(f"content root {self.root} does not exist")
         url = url.strip()
@@ -433,10 +524,16 @@ class Store:
             raise GitError(f"remote {remote} already points at {current}; qap never rewrites a remote "
                            f"(git -C {self.root} remote set-url {remote} <url>, then init again)")
         wrote_ignore = False
-        if not (self.root / ".gitignore").exists():
-            (self.root / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
+        ignore = self.root / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text(GITIGNORE, encoding="utf-8")
             wrote_ignore = True
-            notes.append("wrote .gitignore (system files and caches)")
+            notes.append("wrote .gitignore (system files, caches, and the built pages: rebuilt from their sources)")
+        elif not self.settings.get("backup_built_pages") and \
+                BUILT_RULE not in ignore.read_text(encoding="utf-8", errors="replace").splitlines():
+            text = ignore.read_text(encoding="utf-8", errors="replace")
+            ignore.write_text(text + ("" if text.endswith("\n") or not text else "\n") + BUILT_BLOCK, encoding="utf-8")
+            notes.append("added the built pages to your .gitignore (rebuilt from their sources)")
         self.save_state(remote=remote, branch=branch, initialized=self.state().get("initialized") or now())
         with self.locked():
             try:
@@ -454,8 +551,10 @@ class Store:
                         (self.root / ".gitignore").unlink()
                     self.git("checkout", "--quiet", "-B", branch, "--track", ref)
                     notes.append(f"restored {self.out('rev-list', '--count', 'HEAD')} commit(s) from {ref}")
+                    done = self.rebuild(self.sources_between(None))
+                    notes += self.rebuild_words(done)
                     self.save_state(last_sync={"at": now(), "trigger": "init", "commit": self.short()})
-                    return {"ok": True, "notes": notes, "restored": True, "text": "\n".join(notes)}
+                    return {"ok": True, "notes": notes, "restored": True, "rebuilt": done, "text": "\n".join(notes)}
             result = self._sync(trigger="init", message=None, push=True, unrelated=True)
         result["notes"] = notes
         result["text"] = "\n".join(notes + [result["text"]])
@@ -463,6 +562,7 @@ class Store:
 
     def sync(self, trigger: str = "manual", message: str | None = None, push: bool | None = None) -> dict:
         """Commit everything, pull, push. Automatic triggers stay paused while a conflict is unresolved."""
+        self.trigger = trigger
         self.require_initialized()
         conflict = self.state().get("conflict")
         if conflict and trigger != "manual":
@@ -482,9 +582,11 @@ class Store:
         out = {"ok": True, "trigger": trigger, "committed": None, "pulled": 0, "pushed": 0}
         committed, words = None, []
         ref = self.remote_ref()
+        before = None
         try:
             committed = out["committed"] = self.commit(trigger, message)
             words = [f"committed {committed['files']} file(s) as {committed['sha']}"] if committed else []
+            before = self.out("rev-parse", "HEAD") if self.has_commits() else None
             self.fetch()
             out["pulled"] = self.integrate(ref, unrelated)
             if push:
@@ -505,6 +607,8 @@ class Store:
             return {**out, "ok": False, "error": str(e), "text": "; ".join(words + [f"sync failed{kept}: {e}"])}
         if out["pulled"]:
             words.append(f"pulled {out['pulled']} commit(s)")
+            out["rebuilt"] = self.rebuild(self.sources_between(before))
+            words += self.rebuild_words(out["rebuilt"])
         if out["pushed"]:
             words.append(f"pushed {out['pushed']} commit(s) to {ref}")
         if not words:
@@ -545,9 +649,11 @@ class Store:
         if keep not in ("mine", "theirs"):
             raise GitError("keep must be mine or theirs")
         self.require_initialized()
+        self.trigger = "resolve"
         with self.locked():
             self.require_clean()
             committed = self.commit("resolve")
+            before = self.out("rev-parse", "HEAD") if self.has_commits() else None
             self.fetch()
             ref = self.remote_ref()
             if not self.has_ref(ref):
@@ -572,18 +678,21 @@ class Store:
                              f"qap resolve: kept {'this machine' if keep == 'mine' else 'the remote'}'s version of "
                              f"{len(files)} file(s)", "-m", "\n".join(files), sign=True)
             pushed = self.push() if self.settings.get("push", True) else 0
+            rebuilt = self.rebuild(self.sources_between(before))
             state = self.state()
             state.pop("conflict", None)
             state.pop("last_error", None)
             state["last_sync"] = {"at": now(), "trigger": "resolve", "commit": self.short(), "pulled": 0,
                                   "pushed": pushed, "committed": committed["files"] if committed else 0}
             self._write_state(state)
+        extra = "".join(f", {w}" for w in self.rebuild_words(rebuilt))
         if not files:
-            return {"ok": True, "files": [], "text": f"git: no conflict any more; merged {ref}"
-                                                     + (f" and pushed {pushed} commit(s)" if pushed else "")}
-        return {"ok": True, "files": files, "kept": keep, "other": other, "pushed": pushed,
+            return {"ok": True, "files": [], "rebuilt": rebuilt,
+                    "text": f"git: no conflict any more; merged {ref}"
+                            + (f" and pushed {pushed} commit(s)" if pushed else "") + extra}
+        return {"ok": True, "files": files, "kept": keep, "other": other, "pushed": pushed, "rebuilt": rebuilt,
                 "text": f"git: kept {'your' if keep == 'mine' else 'the remote'} version of {len(files)} file(s)"
-                        + (f", pushed {pushed} commit(s)" if pushed else "")
+                        + (f", pushed {pushed} commit(s)" if pushed else "") + extra
                         + f".\n  The other version is in commit {other}: git -C {self.root} show {other}:<path>"}
 
     # ------------------------------------------------------------------ reading
@@ -656,10 +765,10 @@ class Store:
             out.append(f"{len(big)} file(s) over 50 MB (GitHub refuses 100 MB): {', '.join(big[:3])}")
         if not self.out("config", "user.email", check=False):
             out.append("no git identity: commits will fail (git config --global user.name / user.email)")
-        if self.settings.get("sign_commits", "inherit") == "inherit" and \
+        if self.settings.get("sign_commits", "off") == "inherit" and \
                 self.out("config", "--bool", "commit.gpgsign", check=False) == "true":
-            out.append("your commits are signed (commit.gpgsign): background syncs may prompt or fail; "
-                       "`qap plugins config git-storage sign_commits off` signs nothing qap commits")
+            out.append("your commits are signed (commit.gpgsign) and sign_commits is inherit: background syncs may "
+                       "prompt or fail; `qap plugins config git-storage sign_commits off` leaves them unsigned")
         return out
 
     def status_text(self, info: dict) -> str:
