@@ -209,6 +209,26 @@ export async function newProject(ctx) {
   toast(first ? `Created ${state.title.trim()}: every family is in it for now` : `Created ${state.title.trim()}`);
 }
 
+// Flex stretch only matches tiles in one row. A subject on the next row would stay short, so the
+// whole group takes the height of the longest wrapped title. Short titles stay centred in that box.
+function fitSubjectTiles(root = document) {
+  for (const group of root.querySelectorAll(".tiles.subjects")) {
+    const tiles = [...group.querySelectorAll(":scope > .tile-wrap > a.tile")];
+    if (!tiles.length) continue;
+    for (const box of tiles) box.style.height = "";
+    const height = Math.ceil(Math.max(...tiles.map((box) => box.getBoundingClientRect().height)));
+    for (const box of tiles) box.style.height = height + "px";
+  }
+}
+
+let fitQueued = false;
+function queueFitSubjectTiles() {
+  if (fitQueued) return;
+  fitQueued = true;
+  requestAnimationFrame(() => { fitQueued = false; fitSubjectTiles(); });
+}
+window.addEventListener("resize", queueFitSubjectTiles);
+
 export function renderFolder(view, node, ctx) {
   const isProject = node.kind === "project";
   const projects = node.path ? [] : ctx.projects();
@@ -228,7 +248,8 @@ export function renderFolder(view, node, ctx) {
     .filter(([, items]) => items.length);
   for (const [title, items] of groups) {
     if (groups.length > 1) section.append(el("h3", { class: "group", text: title }));
-    section.append(el("div", { class: "tiles" + (title === "Projects" ? " projects" : "") }, items.map((c) => tile(c, ctx))));
+    const kind = title === "Projects" ? " projects" : title === "Subjects" ? " subjects" : "";
+    section.append(el("div", { class: "tiles" + kind }, items.map((c) => tile(c, ctx))));
   }
   if (!groups.length) {
     section.append(el("p", { class: "empty", text: isProject
@@ -238,4 +259,5 @@ export function renderFolder(view, node, ctx) {
         : "No QA pass yet. `qap new-subject` creates one, `qap place` moves passes in." }));
   }
   view.replaceChildren(section);
+  queueFitSubjectTiles();
 }

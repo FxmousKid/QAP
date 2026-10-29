@@ -83,6 +83,9 @@ body.viewing .searchslot{display:none}
 .tile .glyph svg{width:42px;height:42px;stroke:#fff;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .tile .label{font:650 .8rem/1.2 ui-sans-serif,system-ui,-apple-system,sans-serif;text-align:center;max-width:100%;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 1px rgba(0,0,0,.18)}
+/* A subject title wraps for as many lines as it needs. The group then shares that height (tiles.js). */
+.tiles.subjects .tile{height:auto;min-height:var(--tile)}
+.tiles.subjects .tile .label{display:block;-webkit-line-clamp:unset;overflow:visible;overflow-wrap:break-word}
 /* a folder: a tab on its top edge and a second sheet behind, so folders and subjects never look alike */
 .tile.is-folder::before{content:"";position:absolute;left:14%;top:-7px;width:36%;height:12px;border-radius:7px 7px 0 0;background:inherit;filter:brightness(.88)}
 .tile-wrap.is-folder::before{content:"";position:absolute;top:6px;left:14px;width:var(--tile);height:var(--tile);
