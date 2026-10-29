@@ -3,6 +3,7 @@
 Humans: run a command without its arguments in a terminal and qap asks (folders and subjects from a menu).
 Agents: give every argument, add --json for machine output and --yes to skip confirmations.
 Every command that changes the content goes through qap.layout, the same functions the dashboard uses.
+A command is the function cmd_*; the arguments it takes are the parser entry of the same name, below.
 """
 from __future__ import annotations
 

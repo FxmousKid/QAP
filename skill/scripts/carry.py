@@ -8,7 +8,8 @@ Usage:
 For every subject section (an h2 whose id starts with "p") that holds open .msg blocks:
   - the open .msg blocks (the user's latest words and the AI's answer) move, byte for byte, to the end of the
     section's details.earlier fold (created if missing). Their ids, figures, tables, lists and decision boxes
-    stay as they were, so stars and deep links keep working and the fold shows the original formatting;
+    stay as they were, so stars and deep links keep working and the fold shows the original formatting.
+    A '</div>' inside a comment or a quoted attribute does not end the message.
   - two placeholders are added for the new round: the user's reply (id <subject>-<pass>u) and the answer
     (<subject>-<pass>a). They contain {{TODO:…}}, so build.py refuses the page until they are filled or deleted.
 Subjects in --skip keep their last round open (settled subjects that get no new round).
@@ -24,32 +25,82 @@ import pathlib
 import re
 import sys
 
-H2 = re.compile(r'<h2\b[^>]*\bid="([^"]+)"[^>]*>')
-MSG = re.compile(r'<div class="msg (?:user|ai)\b[^"]*"')
-DETAILS_OPEN = re.compile(r'<details class="earlier"[^>]*>')
+
+def _load_html_span():
+    """The scanner lives next to this script. build.py loads it under the same module name."""
+    import importlib.util
+    key = "qap_skill_html_span"
+    loaded = sys.modules.get(key)
+    if loaded is not None:
+        return loaded
+    path = pathlib.Path(__file__).resolve().parent / "html_span.py"
+    spec = importlib.util.spec_from_file_location(key, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"carry: cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def _match_end(text: str, start: int, tag: str) -> int:
-    """Index just past the element that opens at `start`, counting nested tags of the same name."""
-    pattern = re.compile(rf"<{tag}\b|</{tag}>")
-    depth = 0
-    for m in pattern.finditer(text, start):
-        depth += 1 if not m.group(0).startswith("</") else -1
-        if depth == 0:
-            return m.end()
-    raise SystemExit(f"carry: unbalanced <{tag}> starting at offset {start}")
+html_span = _load_html_span()
+
+
+def _end(text: str, start: int) -> int:
+    try:
+        return html_span.element_end(text, start)
+    except ValueError as e:
+        raise SystemExit(f"carry: {e}") from e
+
+
+def _h2s(text: str) -> list[tuple[int, str]]:
+    """(start, id) of every h2 that has an id. An h2 inside a comment or a <pre> is not a section."""
+    found = []
+    for kind, _a, _b, tag in html_span.scan(text):
+        if kind != "tag" or tag is None or tag.closing or tag.name != "h2":
+            continue
+        own = html_span.attr(tag.attrs, "id")
+        if own:
+            found.append((tag.start, own))
+    return found
+
+
+def _fold(section: str) -> tuple[int, int] | None:
+    for kind, _a, _b, tag in html_span.scan(section):
+        if kind != "tag" or tag is None or tag.closing or tag.name != "details":
+            continue
+        if "earlier" in html_span.classes(tag.attrs):
+            return tag.start, _end(section, tag.start)
+    return None
+
+
+def _close_at(text: str, end: int) -> int:
+    """Start of the tag that finishes at `end`."""
+    for kind, start, stop, tag in html_span.scan(text):
+        if kind == "tag" and stop == end and tag is not None and tag.closing:
+            return start
+    raise SystemExit(f"carry: no closing tag at offset {end}")
+
+
+def _messages(section: str, fold: tuple[int, int] | None) -> list[tuple[int, int]]:
+    spans = []
+    for kind, _a, _b, tag in html_span.scan(section):
+        if kind != "tag" or tag is None or tag.closing or tag.name != "div":
+            continue
+        classes = html_span.classes(tag.attrs)
+        if "msg" not in classes or not ({"user", "ai"} & classes):
+            continue
+        if fold and fold[0] <= tag.start < fold[1]:
+            continue  # already in the earlier fold
+        if spans and tag.start < spans[-1][1]:
+            continue  # nested inside the previous message
+        spans.append((tag.start, _end(section, tag.start)))
+    return spans
 
 
 def carry_section(section: str, sid: str, n: int, ai: str) -> str:
-    fold = DETAILS_OPEN.search(section)
-    fold_span = (fold.start(), _match_end(section, fold.start(), "details")) if fold else None
-    spans = []
-    for m in MSG.finditer(section):
-        if fold_span and fold_span[0] <= m.start() < fold_span[1]:
-            continue
-        if spans and m.start() < spans[-1][1]:
-            continue  # nested inside the previous message
-        spans.append((m.start(), _match_end(section, m.start(), "div")))
+    fold = _fold(section)
+    spans = _messages(section, fold)
     if not spans:
         return section
     moved = "\n".join(section[a:b] for a, b in spans)
@@ -62,17 +113,17 @@ def carry_section(section: str, sid: str, n: int, ai: str) -> str:
         f'<div class="msg ai" id="{sid}-{n}a" data-pass="{n}"><div class="who">{{{{AI:{ai}}}}}</div>\n'
         f"  <p>{{{{TODO:your answer}}}}</p>\n</div>\n"
     )
-    fold = DETAILS_OPEN.search(rest)
+    fold = _fold(rest)
     if fold:
-        end = _match_end(rest, fold.start(), "details")
-        close = rest.rfind("</details>", fold.start(), end)
+        end = fold[1]
+        close = _close_at(rest, end)
         rest = rest[:close] + moved + "\n" + rest[close:end] + "\n" + placeholders + rest[end:].lstrip("\n")
         rest = re.sub(r"(<summary>Earlier in this thread)\s*·\s*\d+\s+messages?(</summary>)", r"\1\2", rest)
     else:
-        h2 = H2.search(rest)
-        assert h2 is not None, "a subject section starts with its h2"
-        close_h2 = rest.find("</h2>", h2.end()) + len("</h2>")
-        after = close_h2
+        heads = _h2s(rest)
+        if not heads:
+            raise SystemExit("carry: a subject section starts with its h2")
+        after = _end(rest, heads[0][0])
         chips = re.compile(r'\s*<span class="chip[^"]*">[^<]*</span>')
         while (m := chips.match(rest, after)):
             after = m.end()
@@ -113,12 +164,10 @@ def main() -> int:
     ns = ap.parse_args()
     src = pathlib.Path(ns.prev).read_text(encoding="utf-8")
     skip = {s.strip() for s in ns.skip.split(",") if s.strip()}
-    heads = list(H2.finditer(src))
+    heads = _h2s(src)
     out, last, carried = [], 0, []
-    for i, h in enumerate(heads):
-        start = h.start()
-        end = heads[i + 1].start() if i + 1 < len(heads) else len(src)
-        sid = h.group(1)
+    for i, (start, sid) in enumerate(heads):
+        end = heads[i + 1][0] if i + 1 < len(heads) else len(src)
         out.append(src[last:start])
         section = src[start:end]
         if sid.startswith("p") and sid not in skip:

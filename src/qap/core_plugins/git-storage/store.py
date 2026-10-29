@@ -104,6 +104,9 @@ def repo_env_vars() -> frozenset[str]:
 
 
 class Store:
+    """One content root, one remote. The methods sit in the order a sync runs: running git, facts about the
+    repository, the lock, committing, which built pages are kept, init / sync / push, then status and history."""
+
     def __init__(self, root: Path, settings: dict | None = None, interactive: bool = False, timeout: int = 90):
         self.root = Path(root).expanduser().resolve()
         self.settings = settings or {}
@@ -290,7 +293,7 @@ class Store:
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
-    # ------------------------------------------------------------------ the steps
+    # ------------------------------------------------------------------ committing
     def commit(self, trigger: str, message: str | None = None) -> dict | None:
         """Stage everything (the .gitignore decides what is left out, and the pages it must not leave out are
         added with -f) and commit it. None: nothing to commit."""
@@ -474,7 +477,7 @@ class Store:
             raise GitError(f"git push failed: {detail}")
         return ahead
 
-    # ------------------------------------------------------------------ what the commands do
+    # ------------------------------------------------------------------ init, sync and push
     def require_initialized(self) -> None:
         if not self.root.is_dir():
             raise GitError(f"content root {self.root} does not exist")
@@ -695,7 +698,7 @@ class Store:
                         + (f", pushed {pushed} commit(s)" if pushed else "") + extra
                         + f".\n  The other version is in commit {other}: git -C {self.root} show {other}:<path>"}
 
-    # ------------------------------------------------------------------ reading
+    # ------------------------------------------------------------------ status and history
     def log(self, n: int = 20) -> list[dict]:
         if not self.is_repo() or not self.has_commits():
             return []

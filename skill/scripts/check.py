@@ -58,6 +58,24 @@ def decision_codes(text: str) -> list[str]:
     return found
 
 
+# The rule, as examples. A row with no codes already says what the code means, or the capital is the
+# article "A" or the pronoun "I". tests/test_pages.py checks decision_codes against this table.
+EXAMPLES = (
+    ("D1 built", ("D1",)),
+    ("C deferred", ("C",)),
+    ("B1 built; C deferred with the retype", ("B1", "C")),
+    ("D1 (drop the Langfuse ids)", ()),
+    ("D1: drop the column", ()),
+    ("…dropped (D1)", ()),
+    ("Langfuse ids: D1 or D2?", ()),
+    ("the question in words: A1 or A2?", ()),
+    ("A1 or A2?", ("A1", "A2")),
+    ("I and J", ("I", "J")),
+    ("I will wait", ()),
+    ("A chart of the times", ()),
+)
+
+
 BLOCKS = {"p", "li", "div", "td", "th", "tr", "h1", "h2", "h3", "h4", "pre", "summary", "figcaption", "blockquote"}
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 
@@ -178,7 +196,8 @@ class Scan(HTMLParser):
 
 
 def main(path: str) -> int:
-    html = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as f:
+        html = f.read()
     scan = Scan()
     scan.feed(html)
     problems, warnings = [], []

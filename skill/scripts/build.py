@@ -93,17 +93,11 @@ def ai_label(vendor: str, name: str, model: str) -> str:
 
 
 # ---- references become links -------------------------------------------------------------------------------
-# One pass over the source: comments, raw-text blocks, tags and {{…}} placeholders are copied untouched; text is
-# linked only outside the elements below, chips (the contents pane copies them into its own links) and AI labels.
+# One pass over the source. html_span copies comments, raw blocks (pre, script, style, textarea, title) and
+# {{…}} placeholders whole, and it does not treat a '>' inside a quoted attribute as the end of a tag.
+# Text is linked only outside the elements below, chips (the contents pane copies them into its own links) and
+# AI labels.
 SKIP = {"a", "code", "summary", "button", "kbd", "samp", "h1"}
-TOKENS = re.compile(
-    r"<!--.*?-->"
-    r"|<(script|style|pre|textarea|title)\b[^>]*>.*?</\1\s*>"
-    r"|<[a-zA-Z/!][^>\"']*(?:(?:\"[^\"]*\"|'[^']*')[^>\"']*)*>"
-    r"|\{\{.*?\}\}",
-    re.S | re.I,
-)
-TAG = re.compile(r"<(/?)([a-zA-Z][\w-]*)([^>]*)>", re.S)
 NUM = r"\d{1,2}(?![\w]|[.,:]\d)"
 SEP = r"(?:\s*,\s*(?:and\s+|or\s+)?|\s+and\s+|\s+or\s+|\s*(?:–|-|&ndash;|&#8211;)\s*|\s+to\s+)"
 REF = re.compile(rf"\b(?P<word>subjects?|need\s+items?)(?P<gap>\s+|&nbsp;)(?P<first>{NUM})(?P<rest>(?:{SEP}{NUM})*)",
@@ -173,64 +167,87 @@ def message_page(attrs: str) -> int | None | bool:
     return int(found.group(1)) - (1 if "user" in classes else 0)
 
 
-def link_references(html: str, src: pathlib.Path | None = None) -> tuple[str, Counter, list[str]]:
-    """Link "subject NN" and "need item N" (see the module docstring). src: the source file, whose folder holds
-    the earlier passes' pages that a need item of an earlier message links to."""
-    ids = set(re.findall(r"\bid=\"([^\"]+)\"", html))
-    need = {n: own for n, own, _ in need_items(html) if own}
-    current = this_pass(html, src)
-    sibling_need: dict[int, dict[int, str]] = {}  # pass -> its page's need ids, read once
-    made: Counter = Counter()
-    unresolved: list[str] = []
+def _load_html_span():
+    """The scanner lives next to this script. carry.py loads it under the same module name."""
+    import importlib.util
+    key = "qap_skill_html_span"
+    loaded = sys.modules.get(key)
+    if loaded is not None:
+        return loaded
+    path = pathlib.Path(__file__).resolve().parent / "html_span.py"
+    spec = importlib.util.spec_from_file_location(key, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"build: cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
-    def elsewhere(page: int | None) -> bool:
-        return page is not None and current is not None and page != current
 
-    def need_of(page: int | None) -> tuple[str, dict[int, str]]:
+html_span = _load_html_span()
+
+
+class _Link:
+    """Link "subject NN" and "need item N" in one pass over the page."""
+
+    def __init__(self, html: str, src: pathlib.Path | None):
+        self.html = html
+        self.src = src
+        self.ids = set(re.findall(r"\bid=\"([^\"]+)\"", html))
+        self.need = {n: own for n, own, _ in need_items(html) if own}
+        self.current = this_pass(html, src)
+        self.sibling_need: dict[int, dict[int, str]] = {}  # pass -> its page's need ids, read once
+        self.made: Counter = Counter()
+        self.unresolved: list[str] = []
+
+    def elsewhere(self, page: int | None) -> bool:
+        return page is not None and self.current is not None and page != self.current
+
+    def need_of(self, page: int | None) -> tuple[str, dict[int, str]]:
         """(href prefix, {item number: id}) of the need list a reference on `page` means: this page's, or the
         built sibling page's ({} when it is missing, or for the chat before pass 1, which has no page)."""
-        if not elsewhere(page):
-            return "", need
+        if not self.elsewhere(page):
+            return "", self.need
         name = f"QA-PASS-{page}.html"
-        if page not in sibling_need:
-            path = src.parent / name if src and page >= 1 else None
+        if page not in self.sibling_need:
+            path = self.src.parent / name if self.src and page >= 1 else None
             items = need_items(path.read_text(encoding="utf-8")) if path and path.is_file() else []
-            sibling_need[page] = {n: own for n, own, _ in items if own}
-        return name, sibling_need[page]
+            self.sibling_need[page] = {n: own for n, own, _ in items if own}
+        return name, self.sibling_need[page]
 
-    def target(word: str, number: str, page: int | None) -> str | None:
+    def target(self, word: str, number: str, page: int | None) -> str | None:
         if word.lower().startswith("need"):
-            prefix, items = need_of(page)
+            prefix, items = self.need_of(page)
             own = items.get(int(number))
             return f"{prefix}#{own}" if own else None
         for candidate in (f"p{int(number)}", f"p{number}"):
-            if candidate in ids:
+            if candidate in self.ids:
                 return f"#{candidate}"
         return None
 
-    def link_text(text: str, page: int | None) -> str:
+    def link_text(self, text: str, page: int | None) -> str:
         def one(m: re.Match[str]) -> str:
             word = m.group("word")
             kind = "need item" if word.lower().startswith("need") else "subject"
             where = ""
-            if kind == "need item" and elsewhere(page):
+            if kind == "need item" and self.elsewhere(page):
                 where = f" (QA-PASS-{page}.html)" if page >= 1 else " (the chat before pass 1)"
-            first = target(word, m.group("first"), page)
+            first = self.target(word, m.group("first"), page)
             if first:
-                made[kind] += 1
-                made["earlier page"] += bool(where)
+                self.made[kind] += 1
+                self.made["earlier page"] += bool(where)
                 piece = f'<a href="{first}">{word}{m.group("gap")}{m.group("first")}</a>'
             else:
-                unresolved.append(f"{word} {m.group('first')}{where}")
+                self.unresolved.append(f"{word} {m.group('first')}{where}")
                 piece = f"{word}{m.group('gap')}{m.group('first')}"
 
             def more(r: re.Match[str]) -> str:
-                t = target(word, r.group(2), page)
+                t = self.target(word, r.group(2), page)
                 if not t:
-                    unresolved.append(f"{word} {r.group(2)}{where}")
+                    self.unresolved.append(f"{word} {r.group(2)}{where}")
                     return r.group(0)
-                made[kind] += 1
-                made["earlier page"] += bool(where)
+                self.made[kind] += 1
+                self.made["earlier page"] += bool(where)
                 return f'{r.group(1)}<a href="{t}">{r.group(2)}</a>'
 
             if not word.lower().endswith("s"):  # "subject 05, 3 tables": a list needs the plural
@@ -239,44 +256,49 @@ def link_references(html: str, src: pathlib.Path | None = None) -> tuple[str, Co
 
         return REF.sub(one, text)
 
-    out: list[str] = []
-    stack: list[tuple[str, bool]] = []  # open SKIP elements and spans (a chip span skips)
-    divs: list[int | None | bool] = []  # open divs: message_page() of each (False: not a message)
-    pos = 0
-    for m in TOKENS.finditer(html):
-        text = html[pos:m.start()]
-        page = next((p for p in reversed(divs) if p is not False), None)  # the innermost message's page
-        out.append(link_text(text, page) if not any(skip for _, skip in stack) else text)
-        out.append(m.group(0))
-        pos = m.end()
-        tag = TAG.match(m.group(0))
-        if not tag or m.group(0).startswith("<!--"):
-            continue
-        closing, name, attrs = tag.group(1), tag.group(2).lower(), tag.group(3)
+    def _on_tag(self, tag, stack: list[tuple[str, bool]], divs: list) -> None:
+        name, attrs = tag.name, tag.attrs
         if name == "div":
-            if closing:
+            if tag.closing:
                 if divs:
                     divs.pop()
-            elif not attrs.rstrip().endswith("/"):
+            elif not tag.self_closing:
                 divs.append(message_page(attrs))
-            continue
+            return
         if name not in SKIP and name != "span":
-            continue
-        if attrs.rstrip().endswith("/"):
-            continue
-        if closing:
+            return
+        if tag.self_closing:
+            return
+        if tag.closing:
             for i in range(len(stack) - 1, -1, -1):
                 if stack[i][0] == name:
                     del stack[i:]
                     break
-        else:
-            cls = re.search(r"\bclass=\"([^\"]*)\"", attrs)
-            label = name == "span" and cls is not None and {"chip", "ai-label"} & set(cls.group(1).split())
-            stack.append((name, name in SKIP or bool(label)))
-    rest = html[pos:]
-    page = next((p for p in reversed(divs) if p is not False), None)
-    out.append(link_text(rest, page) if not any(skip for _, skip in stack) else rest)
-    return "".join(out), made, unresolved
+            return
+        cls = re.search(r"\bclass=\"([^\"]*)\"", attrs)
+        label = name == "span" and cls is not None and {"chip", "ai-label"} & set(cls.group(1).split())
+        stack.append((name, name in SKIP or bool(label)))
+
+    def run(self) -> tuple[str, Counter, list[str]]:
+        out: list[str] = []
+        stack: list[tuple[str, bool]] = []  # open SKIP elements and spans (a chip span skips)
+        divs: list = []  # open divs: message_page() of each (False: not a message)
+        for kind, start, end, tag in html_span.scan(self.html):
+            chunk = self.html[start:end]
+            if kind == "text":
+                page = next((p for p in reversed(divs) if p is not False), None)  # the innermost message's page
+                out.append(chunk if any(skip for _, skip in stack) else self.link_text(chunk, page))
+                continue
+            out.append(chunk)
+            if kind == "tag" and tag is not None:
+                self._on_tag(tag, stack, divs)
+        return "".join(out), self.made, self.unresolved
+
+
+def link_references(html: str, src: pathlib.Path | None = None) -> tuple[str, Counter, list[str]]:
+    """Link "subject NN" and "need item N" (see the module docstring). src: the source file, whose folder holds
+    the earlier passes' pages that a need item of an earlier message links to."""
+    return _Link(html, src).run()
 
 
 def build(src: pathlib.Path, out: pathlib.Path) -> int:
