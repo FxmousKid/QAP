@@ -5,6 +5,7 @@ output) and runs them with the current Python.
 """
 from __future__ import annotations
 
+import html
 import re
 import subprocess
 import sys
@@ -81,12 +82,28 @@ def carry(prev: Path, nxt: Path, n: int, skip: str = "", stars: str = "", ai: st
 
 
 def seed_first(dest: Path, qa_project: str, n: int = 1) -> dict:
-    """Start a subject's first pass from the template, with its qa-project and number filled in."""
+    """Start a subject's first pass from the template, with its qa-project and number filled in.
+
+    The template has three slots for the project name: the qa-project meta, the <title>, and the kicker.
+    A PROJECT left after those three is a slot this function does not know, so it stops rather than
+    rewriting a word in the instructions. The name is escaped: it lands in an attribute and in text.
+    """
     template = config.skill_dir()[0] / "template" / "QA-PASS.src.html"
     text = template.read_text(encoding="utf-8")
-    text = text.replace('content="PROJECT"', f'content="{qa_project}"')
+    n = int(n)
+    name = html.escape(qa_project, quote=True)
+    slots = (
+        ('content="PROJECT"', f'content="{name}"'),
+        ("<title>PROJECT \u2014", f"<title>{name} \u2014"),
+        (">PROJECT \u00b7", f">{name} \u00b7"),
+    )
+    for old, new in slots:
+        if old not in text:
+            raise ValueError(f"template has no {old!r} slot")
+        text = text.replace(old, new, 1)
+    if re.search(r"\bPROJECT\b", text):
+        raise ValueError("template still contains PROJECT after the three known slots")
     text = text.replace('<meta name="qa-pass" content="N">', f'<meta name="qa-pass" content="{n}">')
-    text = re.sub(r"\bPROJECT\b", qa_project, text)
     text = text.replace("Q&amp;A pass N", f"Q&amp;A pass {n}").replace("pass N ·", f"pass {n} ·")
     dest.write_text(text, encoding="utf-8")
     return {"from": str(template), "src": str(dest), "n": n, "ok": True,

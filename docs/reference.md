@@ -8,7 +8,7 @@ dashboard, and the code map.
 | The skill | `skill/` (`~/.claude/skills/qa-pass` is a symlink to it) | `SKILL.md`, the page template, `build.py` / `check.py` / `carry.py`, the page's own JS and CSS |
 | `qap`, the CLI | `src/qap/` | Where a pass goes, the next pass number, carry / build / check, projects, folders and moves |
 | The dashboard | `src/qap/web/` + `qap serve` | Icon tiles for projects, folders and subjects, a pass viewer with a selector made for 40+ passes, the search |
-| Plugins | `src/qap/plugins.py`, `src/qap/core_plugins/` | Obsidian-style plugins ([plugins.md](plugins.md)); `git-storage`, the git backup, is the first |
+| Plugins | `src/qap/plugin.py`, `src/qap/plugins.py`, `src/qap/core_plugins/` | Obsidian-style plugins ([plugins.md](plugins.md)); `git-storage`, the git backup, is the first |
 
 The passes themselves are not here. They live in the content root, by default
 `~/Desktop/Dev/ai/QAP/contents` (its own folder, never in this repository; `qap storage git init` can back it
@@ -184,24 +184,32 @@ The skill's scripts stay the only implementation. `qap` only picks the files and
 bin/qap                 shim: python3 -m qap with src/ on the path (uv run fallback)
 src/qap/config.py       content root and skill dir resolution, ~/.config/qap/config.json
 src/qap/passes.py       pass file names, titles, sections and kicker, next pass number
-src/qap/layout.py       the tree, resolve, and every write (mkdir, new subject, move + relink, place, rmdir,
-                        projects: new, assign, remove)
+src/qap/layout/         the tree. paths.py (a legal path, one json file), read.py (the tree, finding
+                        a thing by name), write.py (create, move, place, remove), project.py
+                        (projects.json: a project, the default, which family is in it)
 src/qap/search.py       the search index (GET /api/search)
+src/qap/snapshot.py     the tree and the search index, reused until a pass file or a manifest changes
 src/qap/skill.py        build/check/carry wrappers, template seeding, safe rebuild
 src/qap/cli.py          argparse commands, prompts (prompt.py), --json output
 src/qap/server.py       http.server: static dashboard, /c/ content, JSON API, plugin routes
-src/qap/plugins.py      the plugin host: manifests, discovery, on/off, Plugin (onload/onunload, add_command,
-                        register_route/event/interval, settings, data.json), events
+src/qap/plugin.py       what a plugin subclasses: Plugin, Setting, Command, the manifest
+src/qap/plugins.py      the host: discovery, on/off, routes, events; re-exports plugin.py
 src/qap/plugin_cli.py   `qap plugins …` and the commands plugins add (qap storage git …)
 src/qap/core_plugins/   core plugins; git-storage/: main.py (wiring), store.py (git), web/ (pill + view)
 src/qap/web/            index.html, style.css, app.js (router), tiles.js, viewer.js, dialogs.js, icons.js, api.js,
                         dom.js; search.js + search.css (the dialog, also loaded by pass pages), fuzzy.js (ranking);
                         plugins.js + plugins.css (the dashboard's plugin host and Plugins page)
 examples/plugins/       build-log: the example plugin
+skill/scripts/html_span.py  tag spans as offsets into the original text (build.py and carry.py)
 skill/assets/           qa-pass.js / qa-pass.css, inlined into every built page
+docs/map.md             the rules that must survive a change, and the test that proves each one
+AGENTS.md               points at docs/map.md
 tests/                  unittest: layout functions, projects, CLI --json, the server, the search index and
                         fuzzy.js (run with node when it is installed), plugins, git-storage end to end (local bare
-                        repos in a temp dir)
+                        repos in a temp dir), the page scripts (build, carry, check, the template seed),
+                        the server snapshot
 ```
+
+The rules that must survive a change, and which test proves each one, are in [map.md](map.md).
 
 Run the tests with `uv run --project . python -m unittest discover -s tests`.

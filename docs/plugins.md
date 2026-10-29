@@ -60,6 +60,8 @@ my-plugin/
 
 ## The Python side
 
+`Plugin` and `Setting` live in `src/qap/plugin.py`. `from qap.plugins import …` re-exports them. Finding plugins, turning them on, and calling what they registered is `src/qap/plugins.py`.
+
 ```python
 from qap.plugins import Plugin, Setting
 

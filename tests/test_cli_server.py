@@ -215,6 +215,14 @@ class Server(unittest.TestCase):
         code, body = self.req("/api/rename", {"path": "work/interaction", "title": "Interaction v3"})
         self.assertEqual(L.read_json(self.root / "work/interaction/subject.json")["title"], "Interaction v3")
 
+    def test_a_changed_pass_shows_up_on_the_next_read(self):
+        first = self.req("/api/tree")[1]
+        self.assertEqual(self.req("/api/tree")[1], first)
+        page = self.root / "db/interaction/QA-PASS-1.html"
+        page.write_text("<h1>Q&amp;A pass 1 revised</h1>", encoding="utf-8")
+        tree = json.loads(self.req("/api/tree")[1])["tree"]
+        self.assertEqual(tree["children"][0]["children"][0]["passes"][0]["title"], "Q&A pass 1 revised")
+
 
 if __name__ == "__main__":
     unittest.main()

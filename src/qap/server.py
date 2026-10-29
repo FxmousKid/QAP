@@ -6,8 +6,8 @@ localStorage per origin. Served from here, every pass of a subject (and the dash
   GET  /                  the dashboard (web/index.html)
   GET  /ui/<file>         the dashboard's modules, stylesheet, icons.json
   GET  /c/<path>          a file of the content root (pages, images); symlinks inside the root are followed
-  GET  /api/tree          the tree: projects, folders, subjects, passes (qap.layout.tree)
-  GET  /api/search        the search index: every project, folder, subject and pass (qap.search.build)
+  GET  /api/tree          the tree: projects, folders, subjects, passes (qap.snapshot.tree)
+  GET  /api/search        the search index: every project, folder, subject and pass (qap.snapshot.search_index)
   POST /api/mkdir         {parent, title, icon?, color?, name?}  -> layout.make_folder (parent "@id": a top-level
                                                                     folder in that project)
   POST /api/mv            {src, dest}                            -> layout.move (dest "@id": assign_project)
@@ -27,6 +27,9 @@ localStorage per origin. Served from here, every pass of a subject (and the dash
 
 Writes are refused unless the request comes from this origin (Host and Origin checked, JSON body), so a web
 page elsewhere cannot drive them; the Host check also stops DNS-rebinding reads.
+
+The tree and the search index are reused until a pass file or a manifest changes. Pass titles stay on the
+tree: the viewer uses them.
 """
 from __future__ import annotations
 
@@ -42,7 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import icons, layout as L, plugins as PL, search
+from . import icons, layout as L, plugins as PL, snapshot
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8750
@@ -132,13 +135,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(target)
         if path == "/api/tree":
             try:
-                return self._json(200, {"ok": True, "root": str(self.root), "tree": L.tree(self.root),
+                return self._json(200, {"ok": True, "root": str(self.root), "tree": snapshot.tree(self.root),
                                         "icons": sorted(icons.builtin())})
             except L.LayoutError as e:
                 return self._json(500, {"ok": False, "error": str(e)})
         if path == "/api/search":
             try:
-                return self._json(200, search.build(self.root))
+                return self._json(200, snapshot.search_index(self.root))
             except L.LayoutError as e:
                 return self._json(500, {"ok": False, "error": str(e)})
         if path == "/favicon.ico":

@@ -120,6 +120,29 @@ class NeedItemsOfEarlierPasses(unittest.TestCase):
             self.assertIn('<a href="QA-PASS-3.html#need-11">11</a>', first)
             self.assertEqual(again.read_text(encoding="utf-8"), first)
 
+    def test_a_comment_a_pre_and_a_quoted_gt_are_not_linked(self):
+        html = page(4, """
+<h2 id="p5"><span class="n">05</span>Five</h2>
+<!-- subject 05 and need item 1 -->
+<pre>subject 05
+need item 1</pre>
+<p><code>need item 1</code> <span title="need item 9 > still the attribute">see subject 05</span>.</p>
+<div class="msg ai" id="p5-3a" data-pass="3" title="a > b"><div class="who">AI</div>
+  <p>From pass 3: need item 1.</p>
+</div>
+""", need_list(2))
+        out, _, _ = build.link_references(build.number_need_items(html), self.src)
+        self.assertIn("<!-- subject 05 and need item 1 -->", out)
+        self.assertIn("<pre>subject 05\nneed item 1</pre>", out)
+        self.assertIn("<code>need item 1</code>", out)
+        self.assertIn('title="need item 9 > still the attribute"', out)
+        self.assertIn('title="a > b"', out)
+        self.assertEqual(out.count('href="#p5"'), 1)
+        self.assertIn('see <a href="#p5">subject 05</a>', out)
+        self.assertEqual(out.count("QA-PASS-3.html#need-1"), 1)
+        self.assertIn('From pass 3: <a href="QA-PASS-3.html#need-1">need item 1</a>.', out)
+        self.assertNotIn('href="#need-1"', out)
+
     def test_without_a_pass_number_every_reference_is_local(self):
         html, _, _ = build.link_references(build.number_need_items(SOURCE.replace(
             '<meta name="qa-pass" content="4">', "")), None)
