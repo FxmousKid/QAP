@@ -1,13 +1,15 @@
 """qap serve: the dashboard and the content from ONE origin, bound to 127.0.0.1 only.
 
-One origin matters: the pages keep their stars in localStorage under qa-stars:<qa-project>, and browsers keep
-localStorage per origin. Served from here, every pass of a subject (and the dashboard's frame) shares them.
+FastAPI serves it (uvicorn listens). One origin matters: the pages keep their stars in localStorage under
+qa-stars:<qa-project>, and browsers keep localStorage per origin. Served from here, every pass of a subject
+(and the dashboard's frame) shares them.
 
   GET  /                  the dashboard (web/index.html)
   GET  /ui/<file>         the dashboard's modules, stylesheet, icons.json
   GET  /c/<path>          a file of the content root (pages, images); symlinks inside the root are followed
   GET  /api/tree          the tree: projects, folders, subjects, passes (qap.snapshot.tree)
   GET  /api/search        the search index: every project, folder, subject and pass (qap.snapshot.search_index)
+  GET  /docs              the same API, as OpenAPI
   POST /api/mkdir         {parent, title, icon?, color?, name?}  -> layout.make_folder (parent "@id": a top-level
                                                                     folder in that project)
   POST /api/mv            {src, dest}                            -> layout.move (dest "@id": assign_project)
@@ -36,19 +38,33 @@ from __future__ import annotations
 import errno
 import json
 import mimetypes
+import os
 import posixpath
+import socket
+import stat
 import sys
 import threading
 import webbrowser
-from email.utils import formatdate, parsedate_to_datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlsplit
+from typing import Annotated
+
+import uvicorn
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import icons, layout as L, plugins as PL, snapshot
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8750
+_MAX_BODY = 64 * 1024
+_SECURITY = {
+    "Cache-Control": "no-cache",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
          ".md": "text/plain; charset=utf-8", ".svg": "image/svg+xml", ".py": "text/plain; charset=utf-8",
@@ -59,181 +75,249 @@ def content_type(path: Path) -> str:
     return TYPES.get(path.suffix.lower()) or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = "qap"
-    root: Path
-    app: PL.App
-    lock = threading.Lock()
+def _json(code: int, data: dict) -> JSONResponse:
+    return JSONResponse(data, status_code=code, headers=_SECURITY)
 
-    # -------------------------------------------------------------- guards
-    def _hosts(self) -> set[str]:
-        port = self.server.server_address[1]
-        return {f"127.0.0.1:{port}", f"localhost:{port}"}
 
-    def _host_ok(self) -> bool:
-        return (self.headers.get("Host") or "") in self._hosts()
+def _log_message(fmt: str, *args: object) -> None:
+    """Quiet access log: 4xx and 5xx only. Tests replace this on RequestHandlerClass."""
+    if len(args) > 1 and str(args[1])[:1] in "45":
+        sys.stderr.write(f"qap serve: {args[0]} -> {args[1]}\n")
 
-    def _origin_ok(self) -> bool:
-        origin = self.headers.get("Origin")
-        return origin is None or origin in {f"http://{h}" for h in self._hosts()}
 
-    # -------------------------------------------------------------- responses
-    def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+def _bound_port(request: Request) -> int:
+    server = request.scope.get("server")
+    if server and server[1]:
+        return int(server[1])
+    return request.app.state.port
 
-    def _json(self, code: int, data: dict) -> None:
-        self._send(code, json.dumps(data, ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
-    def _file(self, path: Path) -> None:
+async def _json_body(request: Request) -> dict:
+    """A POST body. Empty is {}. Anything that is not a JSON object is a 400 the dashboard can show."""
+    raw = await request.body()
+    if len(raw) > _MAX_BODY:
+        raise HTTPException(status_code=413, detail="body too large")
+    try:
+        data = json.loads(raw or b"{}")
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"bad JSON: {e}") from e
+    return data
+
+
+JsonBody = Annotated[dict, Depends(_json_body)]
+
+
+def _under(base: Path, rel: str) -> Path | None:
+    """base/rel for a URL path, refusing '..' escapes and hidden segments (symlinks are followed)."""
+    norm = posixpath.normpath("/" + rel).lstrip("/")
+    if not norm or any(seg.startswith(".") for seg in norm.split("/")):
+        return None
+    return base / norm
+
+
+def _file(path: Path, request: Request) -> Response:
+    try:
+        st = path.stat()
+    except OSError:
+        return _json(404, {"ok": False, "error": "not found"})
+    if not stat.S_ISREG(st.st_mode):
+        return _json(404, {"ok": False, "error": "not found"})
+    since = request.headers.get("if-modified-since")
+    if since:
         try:
-            st = path.stat()
-        except OSError:
-            return self._json(404, {"ok": False, "error": "not found"})
-        since = self.headers.get("If-Modified-Since")
-        if since:
-            try:
-                if int(st.st_mtime) <= parsedate_to_datetime(since).timestamp():
-                    self.send_response(304)
-                    self.send_header("Cache-Control", "no-cache")
-                    self.end_headers()
-                    return
-            except (TypeError, ValueError):
-                pass
-        self._send(200, path.read_bytes(), content_type(path),
-                   {"Last-Modified": formatdate(st.st_mtime, usegmt=True)})
+            if int(st.st_mtime) <= parsedate_to_datetime(since).timestamp():
+                return Response(status_code=304, headers=dict(_SECURITY))
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
+    return FileResponse(path, media_type=content_type(path), stat_result=st, headers=dict(_SECURITY))
 
-    def log_message(self, fmt: str, *args) -> None:  # quiet: errors only
-        if len(args) > 1 and str(args[1])[:1] in "45":
-            sys.stderr.write(f"qap serve: {self.command} {self.path} -> {args[1]}\n")
 
-    # -------------------------------------------------------------- GET
-    def do_HEAD(self) -> None:
-        self.do_GET()
+def _query(request: Request) -> dict:
+    found: dict[str, str] = {}
+    for key, value in request.query_params.multi_items():
+        found[key] = value  # a repeated key: the plugin sees the last one
+    return found
 
-    def do_GET(self) -> None:
-        if not self._host_ok():
-            return self._json(421, {"ok": False, "error": "use http://127.0.0.1 or http://localhost"})
-        path = unquote(urlsplit(self.path).path)
-        if path in ("/", "/index.html"):
-            return self._file(WEB / "index.html")
-        if path.startswith("/ui/"):
-            return self._file(self._under(WEB, path[len("/ui/"):]) or WEB / "__missing__")
-        if path.startswith("/c/"):
-            target = self._under(self.root, path[len("/c/"):])
-            if target is None or not target.is_file():
-                return self._json(404, {"ok": False, "error": f"no such file: {path[3:]}"})
-            return self._file(target)
-        if path == "/api/tree":
-            try:
-                return self._json(200, {"ok": True, "root": str(self.root), "tree": snapshot.tree(self.root),
-                                        "icons": sorted(icons.builtin())})
-            except L.LayoutError as e:
-                return self._json(500, {"ok": False, "error": str(e)})
-        if path == "/api/search":
-            try:
-                return self._json(200, snapshot.search_index(self.root))
-            except L.LayoutError as e:
-                return self._json(500, {"ok": False, "error": str(e)})
-        if path == "/favicon.ico":
-            return self._file(WEB / "favicon.svg")
-        if path == "/api/plugins":
-            return self._json(200, {"ok": True, "app_version": self.app.version, "plugins": self.app.describe()})
-        if path.startswith("/plugins/"):  # a plugin's dashboard files: only what sits in its web/ folder
-            pid, _, rest = path[len("/plugins/"):].partition("/")
-            plugin = self.app.plugins.get(pid)
-            target = self._under(plugin.folder / "web", rest[len("web/"):]) if plugin and rest.startswith("web/") else None
-            if target is None or not target.is_file():
-                return self._json(404, {"ok": False, "error": "not found"})
-            return self._file(target)
-        if path.startswith("/api/plugins/"):
-            query = {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
-            return self._plugin_call("GET", path, query)
-        return self._json(404, {"ok": False, "error": "not found"})
 
-    @staticmethod
-    def _under(base: Path, rel: str) -> Path | None:
-        """base/rel for a URL path, refusing '..' escapes and hidden segments (symlinks are followed)."""
-        norm = posixpath.normpath("/" + rel).lstrip("/")
-        if not norm or any(seg.startswith(".") for seg in norm.split("/")):
+# ------------------------------------------------------------------ the app
+
+def build_api(root: Path, plugins: PL.App) -> FastAPI:
+    api = FastAPI(
+        title="qap",
+        description="Local dashboard for QA passes, bound to 127.0.0.1.",
+        redirect_slashes=False,
+        telemetry={"tracing": False, "metrics": False, "logs": False},
+    )
+    api.state.root = root
+    api.state.plugins = plugins
+    api.state.lock = threading.Lock()
+    api.state.port = 0
+
+    @api.middleware("http")
+    async def guard(request: Request, call_next):
+        refused = _refused(request)
+        response = refused if refused is not None else await call_next(request)
+        for key, value in _SECURITY.items():
+            response.headers[key] = value
+        status = str(response.status_code)
+        if status[:1] in "45":
+            request.app.state.server.RequestHandlerClass.log_message(
+                '"%s" %s %s', f"{request.method} {request.scope['path']}", status, "-")
+        return response
+
+    def _refused(request: Request) -> JSONResponse | None:
+        port = _bound_port(request)
+        hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        host = request.headers.get("host", "")
+        if request.method == "POST":
+            origin = request.headers.get("origin")
+            if host not in hosts or (origin is not None and origin not in {f"http://{h}" for h in hosts}):
+                return _json(403, {"ok": False, "error": "writes are only accepted from the dashboard's origin"})
+            if not request.headers.get("content-type", "").startswith("application/json"):
+                return _json(415, {"ok": False, "error": "send JSON"})
+            length = int(request.headers.get("content-length") or 0)
+            if length > _MAX_BODY:
+                return _json(413, {"ok": False, "error": "body too large"})
             return None
-        return base / norm
+        if host not in hosts:
+            return _json(421, {"ok": False, "error": "use http://127.0.0.1 or http://localhost"})
+        return None
 
-    # -------------------------------------------------------------- POST
-    def do_POST(self) -> None:
-        if not self._host_ok() or not self._origin_ok():
-            return self._json(403, {"ok": False, "error": "writes are only accepted from the dashboard's origin"})
-        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
-            return self._json(415, {"ok": False, "error": "send JSON"})
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > 64 * 1024:
-            return self._json(413, {"ok": False, "error": "body too large"})
+    async def on_http_error(request: Request, exc: HTTPException) -> JSONResponse:
+        if exc.status_code == 404:
+            return _json(404, {"ok": False, "error": "not found"})
+        error = exc.detail if isinstance(exc.detail, str) else "bad request"
+        return _json(exc.status_code, {"ok": False, "error": error})
+
+    async def on_bad_json(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return _json(400, {"ok": False, "error": f"bad JSON: {exc.errors()[0]['msg']}"})
+
+    api.add_exception_handler(HTTPException, on_http_error)
+    api.add_exception_handler(RequestValidationError, on_bad_json)
+
+    # A pass page probes /ui/search.js with HEAD. FastAPI does not answer HEAD for a GET route, so each
+    # read is registered twice. The HEAD copy stays out of /docs (one operation id per path).
+    def read(path: str, *, include_in_schema: bool = True):
+        def decorate(fn):
+            api.add_api_route(path, fn, methods=["GET"], include_in_schema=include_in_schema)
+            api.add_api_route(path, fn, methods=["HEAD"], include_in_schema=False)
+            return fn
+        return decorate
+
+    @read("/", include_in_schema=False)
+    @read("/index.html", include_in_schema=False)
+    def index_page(request: Request) -> Response:
+        return _file(WEB / "index.html", request)
+
+    @read("/favicon.ico", include_in_schema=False)
+    def favicon(request: Request) -> Response:
+        return _file(WEB / "favicon.svg", request)
+
+    @read("/ui/{rel:path}", include_in_schema=False)
+    def ui_file(rel: str, request: Request) -> Response:
+        target = _under(WEB, rel)
+        if target is None:
+            return _json(404, {"ok": False, "error": "not found"})
+        return _file(target, request)
+
+    @read("/c/{rel:path}", include_in_schema=False)
+    def content_file(rel: str, request: Request) -> Response:
+        target = _under(request.app.state.root, rel)
+        if target is None or not target.is_file():
+            return _json(404, {"ok": False, "error": f"no such file: {request.scope['path'][3:]}"})
+        return _file(target, request)
+
+    @read("/plugins/{pid}/{rel:path}", include_in_schema=False)
+    def plugin_file(pid: str, rel: str, request: Request) -> Response:
+        plugin = request.app.state.plugins.plugins.get(pid)
+        web = plugin.folder / "web" if plugin else None
+        target = _under(web, rel[len("web/"):]) if web is not None and rel.startswith("web/") else None
+        if target is None or not target.is_file():
+            return _json(404, {"ok": False, "error": "not found"})
+        return _file(target, request)
+
+    @read("/api/tree")
+    def api_tree(request: Request) -> JSONResponse:
+        root = request.app.state.root
         try:
-            body = json.loads(self.rfile.read(length) or b"{}")
-            if not isinstance(body, dict):
-                raise ValueError("expected a JSON object")
-        except ValueError as e:
-            return self._json(400, {"ok": False, "error": f"bad JSON: {e}"})
-        if urlsplit(self.path).path.startswith("/api/plugins/"):
-            return self._plugin_call("POST", unquote(urlsplit(self.path).path), body)
-        action = urlsplit(self.path).path.removeprefix("/api/")
+            tree = snapshot.tree(root)
+        except L.LayoutError as e:
+            return _json(500, {"ok": False, "error": str(e)})
+        return _json(200, {"ok": True, "root": str(root), "tree": tree, "icons": sorted(icons.builtin())})
+
+    @read("/api/search")
+    def api_search(request: Request) -> JSONResponse:
+        try:
+            return _json(200, snapshot.search_index(request.app.state.root))
+        except L.LayoutError as e:
+            return _json(500, {"ok": False, "error": str(e)})
+
+    @read("/api/plugins")
+    def api_plugins(request: Request) -> JSONResponse:
+        app = request.app.state.plugins
+        return _json(200, {"ok": True, "app_version": app.version, "plugins": app.describe()})
+
+    # Plugin routes are registered before POST /api/{action}, or that route would swallow them.
+    @read("/api/plugins/{pid}/{rest:path}")
+    def plugin_get(pid: str, rest: str, request: Request) -> JSONResponse:
+        return _plugin_call(request, "GET", pid, rest, _query(request))
+
+    @api.post("/api/plugins/{pid}/{rest:path}")
+    def plugin_post(pid: str, rest: str, request: Request, body: JsonBody) -> JSONResponse:
+        return _plugin_call(request, "POST", pid, rest, body)
+
+    @api.post("/api/{action:path}")
+    def post_action(action: str, request: Request, body: JsonBody) -> JSONResponse:
         handler = ACTIONS.get(action)
-        if not handler:
-            return self._json(404, {"ok": False, "error": f"no action {action!r}"})
+        if handler is None:
+            return _json(404, {"ok": False, "error": f"no action {action!r}"})
         try:
-            with self.lock:
-                result = handler(self.root, body)
+            with request.app.state.lock:
+                result = handler(request.app.state.root, body)
         except (L.LayoutError, ValueError, OSError) as e:
-            return self._json(400, {"ok": False, "error": str(e)})
-        self.app.emit("content_changed", {"action": action, "source": "dashboard", "request": body})
-        return self._json(200, {"ok": True, **result})
+            return _json(400, {"ok": False, "error": str(e)})
+        request.app.state.plugins.emit("content_changed", {"action": action, "source": "dashboard", "request": body})
+        return _json(200, {"ok": True, **result})
 
-    # -------------------------------------------------------------- plugins
-    def _plugin_call(self, method: str, path: str, body: dict) -> None:
-        pid, _, rest = path[len("/api/plugins/"):].partition("/")
-        app = self.app
-        try:
-            if method == "POST" and rest in ("enable", "disable"):
-                found = app.found().get(pid)
-                if rest == "enable" and found and not found.core and not app.is_enabled(pid, found):
-                    # a page served from /c/ shares this origin: it must not be able to switch on code
-                    return self._json(403, {"ok": False, "error": f"turn a community plugin on from a terminal: "
-                                                                  f"qap plugins enable {pid}"})
-                app.enable(pid) if rest == "enable" else app.disable(pid)
-                return self._json(200, {"ok": True, "plugins": app.describe()})
-            if method == "POST" and rest == "settings":
-                plugin = app.get(pid)
-                saved = {key: plugin.set_setting(key, value) for key, value in body.items()}
-                return self._json(200, {"ok": True, "saved": saved})
-            if method == "POST" and rest.startswith("run/"):
-                cmd = app._commands.get(f"{pid}:{rest[4:]}")
-                if not cmd:
-                    return self._json(404, {"ok": False, "error": f"no command {pid}:{rest[4:]}"})
-                known = cmd.defaults()
-                result = app.run_command(cmd.full_id, {k: v for k, v in body.items() if k in known},
-                                         source="dashboard")
-            else:
-                handler = app.route(pid, method, rest)
-                if not handler:
-                    return self._json(404, {"ok": False, "error": f"no route {method} {path}"})
-                result = {"ok": True, **(handler(body) or {})}
-        except PL.PluginError as e:
-            return self._json(400, {"ok": False, "error": str(e)})
-        except Exception as e:  # a plugin bug is a 500 for that call, never a dead server
-            app.log(f"plugin {pid}: {method} {rest} failed: {type(e).__name__}: {e}")
-            return self._json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
-        if not result.get("ok", True):
-            result.setdefault("error", result.get("text") or "failed")
-        return self._json(200, result)
+    return api
+
+
+def _plugin_call(request: Request, method: str, pid: str, rest: str, body: dict) -> JSONResponse:
+    app = request.app.state.plugins
+    try:
+        if method == "POST" and rest in ("enable", "disable"):
+            found = app.found().get(pid)
+            if rest == "enable" and found and not found.core and not app.is_enabled(pid, found):
+                # a page served from /c/ shares this origin: it must not be able to switch on code
+                return _json(403, {"ok": False, "error": f"turn a community plugin on from a terminal: "
+                                                         f"qap plugins enable {pid}"})
+            app.enable(pid) if rest == "enable" else app.disable(pid)
+            return _json(200, {"ok": True, "plugins": app.describe()})
+        if method == "POST" and rest == "settings":
+            plugin = app.get(pid)
+            saved = {key: plugin.set_setting(key, value) for key, value in body.items()}
+            return _json(200, {"ok": True, "saved": saved})
+        if method == "POST" and rest.startswith("run/"):
+            cmd = app._commands.get(f"{pid}:{rest[4:]}")
+            if not cmd:
+                return _json(404, {"ok": False, "error": f"no command {pid}:{rest[4:]}"})
+            known = cmd.defaults()
+            result = app.run_command(cmd.full_id, {k: v for k, v in body.items() if k in known}, source="dashboard")
+        else:
+            handler = app.route(pid, method, rest)
+            if not handler:
+                return _json(404, {"ok": False, "error": f"no route {method} {request.scope['path']}"})
+            result = {"ok": True, **(handler(body) or {})}
+    except PL.PluginError as e:
+        return _json(400, {"ok": False, "error": str(e)})
+    except Exception as e:  # a plugin bug is a 500 for that call, never a dead server
+        app.log(f"plugin {pid}: {method} {rest} failed: {type(e).__name__}: {e}")
+        return _json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+    if not result.get("ok", True):
+        result.setdefault("error", result.get("text") or "failed")
+    return _json(200, result)
 
 
 # ------------------------------------------------------------------ actions (same functions as the CLI)
@@ -316,21 +400,61 @@ ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_i
 
 # ------------------------------------------------------------------ entry point
 
-def make_server(root: Path, port: int | None, app: PL.App | None = None) -> ThreadingHTTPServer:
+class QapServer:
+    """The socket is bound here, so server_address is known before serve_forever. Tests drive this object."""
+
+    def __init__(self, api: FastAPI, sock: socket.socket):
+        self._sock = sock
+        self.server_address = sock.getsockname()
+        self.RequestHandlerClass = type("RequestHandler", (), {"log_message": staticmethod(_log_message)})
+        api.state.server = self
+        api.state.port = self.server_address[1]
+        config = uvicorn.Config(api, host="127.0.0.1", port=self.server_address[1], lifespan="off",
+                                log_config=None, access_log=False, log_level="warning")
+        self._uvicorn = uvicorn.Server(config)
+        self._done = threading.Event()
+
+    def serve_forever(self) -> None:
+        try:
+            self._uvicorn.run(sockets=[self._sock])
+        finally:
+            self._done.set()
+
+    def shutdown(self) -> None:
+        self._uvicorn.should_exit = True
+        self._done.wait(timeout=5)
+
+    def server_close(self) -> None:
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+
+def _listen(port: int) -> socket.socket:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", port))
+        sock.listen(128)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def make_server(root: Path, port: int | None, app: PL.App | None = None) -> QapServer:
     app = app or PL.App(root, mode="serve")  # no plugin loaded unless the caller loaded them
     app.set_root(root)
-    handler = type("QapHandler", (Handler,), {"root": root, "app": app})
+    api = build_api(root, app)
     explicit = port is not None
     port = DEFAULT_PORT if port is None else port
     for candidate in [port] if explicit else range(port, port + 20):
         try:
-            httpd = ThreadingHTTPServer(("127.0.0.1", candidate), handler)
-            httpd.daemon_threads = True
-            return httpd
+            return QapServer(api, _listen(candidate))
         except OSError as e:
             if e.errno != errno.EADDRINUSE or explicit:
                 raise OSError(f"cannot listen on 127.0.0.1:{candidate}: {e.strerror}"
-                              + (" (pick another --port)" if e.errno == errno.EADDRINUSE else ""))
+                              + (" (pick another --port)" if e.errno == errno.EADDRINUSE else "")) from e
     raise OSError(f"ports {port}-{port + 19} are all taken; pick one with --port")
 
 
@@ -344,7 +468,7 @@ def serve(root: Path, port: int | None = None, open_browser: bool = False, as_js
     httpd = make_server(root, port, app)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
     if as_json:
-        print(json.dumps({"ok": True, "url": url, "root": str(root), "pid": __import__("os").getpid()}), flush=True)
+        print(json.dumps({"ok": True, "url": url, "root": str(root), "pid": os.getpid()}), flush=True)
     else:
         print(f"QA passes dashboard: {url}\n  content: {root}\n  Ctrl+C to stop", flush=True)
     if open_browser:

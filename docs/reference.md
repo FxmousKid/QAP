@@ -159,9 +159,9 @@ browser keeps `localStorage` per origin. Served this way, a star made in pass 3 
   page (`#/~plugins`): each plugin's on/off switch, settings and commands. Plugins add status items (the
   `git` pill) and views (`#/~plugins/git-storage/status`).
 
-The server is Python's `http.server`, bound to 127.0.0.1 only. It has a small JSON API (`GET /api/tree`,
+The server is FastAPI, run by uvicorn, bound to 127.0.0.1 only. It has a small JSON API (`GET /api/tree`,
 `GET /api/search`, `POST /api/mkdir|mv|rename|icon|rmdir|project`; a project is `@id` in a path) that
-calls the same functions as the CLI (`qap.layout`, `qap.search`). It
+calls the same functions as the CLI (`qap.layout`, `qap.search`). The same API is at `/docs`. It
 refuses writes that do not come from its own origin (it checks the Host and Origin headers, and requires a
 JSON body). Plugins add `GET /api/plugins`, `POST /api/plugins/<id>/enable|disable|settings|run/<command>`,
 their own `/api/plugins/<id>/<route>` (POSTs pass the same guards) and `/plugins/<id>/web/<file>`.
@@ -191,7 +191,7 @@ src/qap/search.py       the search index (GET /api/search)
 src/qap/snapshot.py     the tree and the search index, reused until a pass file or a manifest changes
 src/qap/skill.py        build/check/carry wrappers, template seeding, safe rebuild
 src/qap/cli.py          argparse commands, prompts (prompt.py), --json output
-src/qap/server.py       http.server: static dashboard, /c/ content, JSON API, plugin routes
+src/qap/server.py       FastAPI: static dashboard, /c/ content, JSON API, plugin routes
 src/qap/plugin.py       what a plugin subclasses: Plugin, Setting, Command, the manifest
 src/qap/plugins.py      the host: discovery, on/off, routes, events; re-exports plugin.py
 src/qap/plugin_cli.py   `qap plugins …` and the commands plugins add (qap storage git …)

@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "QA-pass tooling: place, carry, build and browse QA passes (CLI + local dashboard)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "fastapi>=0.162.0",
+    "uvicorn>=0.54.0",
+]
 
 [project.scripts]
 qap = "qap.cli:main"
