@@ -95,6 +95,17 @@ class Reading(Fixture):
         self.assertTrue(loose["implicit"])
         self.assertEqual(loose["qa_project"], "loose")
 
+    def test_subjects_are_sorted_by_when_they_were_created(self):
+        db = self.root / "db"
+        for name, created in (("signal", "2026-10-22"), ("interaction", "2026-10-23")):
+            meta = L.read_json(db / name / "subject.json")
+            meta["created"] = created
+            L.write_json(db / name / "subject.json", meta)
+        (db / "aaa").mkdir()
+        L.write_json(db / "aaa" / "subject.json", {"title": "Aaa", "qa_project": "aaa", "sources": []})
+        names = [c["name"] for c in L.resolve(self.root, "db", "folder")["children"]]
+        self.assertEqual(names, ["signal", "interaction", "aaa"])
+
     def test_order_list_in_parent(self):
         L.write_json(self.root / "db/folder.json", {"title": "DB", "order": ["signal", "interaction"]})
         db = L.resolve(self.root, "db", "folder")

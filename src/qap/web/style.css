@@ -125,15 +125,31 @@ body.viewing .searchslot{display:none}
 
 /* ===== subject view: the pass in a large frame, the pass selector in the bar ===== */
 body.viewing{overflow:hidden}
-.viewer{height:calc(100dvh - var(--bar));display:flex;flex-direction:column}
+.viewer{height:calc(100dvh - var(--bar-h, var(--bar)));display:flex;flex-direction:column}
 .frame{flex:1;width:100%;border:0;background:var(--bg)}
-.passnav{display:flex;align-items:center;gap:6px;min-width:0;flex:1;justify-content:flex-end}
+/* Share stays on this bar. The theme stays on the library screens: a pass is for reading, and for stars. */
+body.viewing #theme{display:none}
+/* Fold hides the whole bar. #unfold sits outside it, so it is the one control left, at the window's top right.
+   12px + 30px wide: the framed page keeps View ★s to the left of that (viewer.js, 52px). */
+body.bar-folded .bar{display:none}
+body.bar-folded .viewer{height:100dvh}
+#unfold{display:none;position:fixed;z-index:35;top:12px;right:12px;width:30px;height:30px;padding:0;
+  align-items:center;justify-content:center;box-shadow:var(--shadow)}
+body.viewing.bar-folded #unfold{display:flex}
+/* A pass puts its controls on a second row, so the breadcrumb and the pass numbers each keep a line. */
+body.viewing .bar{height:auto;flex-wrap:wrap;row-gap:6px;padding-top:8px;padding-bottom:8px}
+body.viewing .crumbs{flex:1}
+body.viewing .tools{order:3;flex-basis:100%;justify-content:flex-start}
+.passnav{display:flex;align-items:center;gap:6px;min-width:0;flex:1;justify-content:flex-start}
 .passnav .step{flex:none;width:30px;height:30px;padding:0;border-radius:999px;font-size:1rem;line-height:1}
-.passnav .pick,.passnav .open-page{flex:none}
+.passnav .pick,.passnav .open-page,.passnav .share,.passnav .fold{flex:none}
+.passnav .fold{width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.passnav .fold svg,#unfold svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .pick{display:inline-flex;align-items:center;gap:6px}
 .pick small{color:var(--ink3);font-weight:500}
-.strip{position:relative;display:flex;gap:3px;overflow-x:auto;scrollbar-width:none;min-width:0;max-width:min(34vw,520px);padding:3px 2px;
-  scroll-behavior:smooth;mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+.strip{position:relative;display:flex;gap:3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;min-width:0;flex:1 1 120px;
+  max-width:none;padding:3px 2px;scroll-behavior:smooth;
+  mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
 .strip a{flex:none;min-width:28px;height:26px;padding:0 6px;border-radius:7px;display:flex;align-items:center;justify-content:center;
   font:600 .74rem/1 var(--mono);color:var(--ink3);border:1px solid transparent}
 .strip a:hover{color:var(--ink);border-color:var(--rule2)}
@@ -162,6 +178,7 @@ body.viewing{overflow:hidden}
 .menu hr{border:0;border-top:1px solid var(--rule);margin:4px 2px}
 dialog.dlg{border:1px solid var(--rule2);border-radius:16px;background:var(--surface);color:var(--ink);padding:0;width:min(520px,94vw);
   box-shadow:0 18px 60px rgba(0,0,0,.3)}
+dialog.dlg.wide{width:min(760px,94vw)}
 dialog.dlg::backdrop{background:rgba(10,9,8,.45)}
 .dlg form{display:flex;flex-direction:column;gap:14px;padding:18px 20px}
 .dlg h2{margin:0;font-size:1.05rem}
@@ -169,6 +186,12 @@ dialog.dlg::backdrop{background:rgba(10,9,8,.45)}
 .dlg input[type=text]{font:400 .95rem/1.3 ui-sans-serif,system-ui,-apple-system,sans-serif;text-transform:none;letter-spacing:0;color:var(--ink);background:var(--bg);
   border:1px solid var(--rule2);border-radius:10px;padding:9px 11px}
 .dlg input[type=text]:focus{outline:2px solid var(--gold);outline-offset:0}
+.dlg textarea{font:400 .82rem/1.45 var(--mono);text-transform:none;letter-spacing:0;color:var(--ink);background:var(--bg);
+  border:1px solid var(--rule2);border-radius:10px;padding:9px 11px;width:100%;resize:vertical;min-height:6.5em}
+.dlg textarea:focus{outline:2px solid var(--gold);outline-offset:0}
+.dlg .share-preview{font:500 .78rem/1.5 var(--mono);text-transform:none;letter-spacing:0;color:var(--ink);
+  white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;margin:0;background:var(--bg);
+  border:1px solid var(--rule);border-radius:10px;padding:10px 12px}
 .dlg .row{display:flex;gap:8px;justify-content:flex-end}
 .dlg .err{color:var(--bad);font-size:.85rem;min-height:1em;margin:0}
 .dlg .hint{margin:8px 0 0;color:var(--ink3);font-size:.85rem;line-height:1.45}
@@ -212,7 +235,7 @@ dialog.dlg::backdrop{background:rgba(10,9,8,.45)}
   .tile.is-project .glyph{height:44px;font-size:38px}
   .tile.is-project .glyph svg{width:40px;height:40px}
   .strip{display:none}
-  .passnav{justify-content:flex-end}
+  .passnav{justify-content:flex-start}
   .viewer{height:calc(100dvh - var(--bar-h, 96px))}
   .tiles{gap:20px 12px}
   .tile .glyph{height:38px;font-size:32px}

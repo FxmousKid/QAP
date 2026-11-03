@@ -48,9 +48,12 @@ def folder_node(root: Path, path: Path, with_titles: bool = True) -> dict:
 
     def key(c: dict):
         own = c.get("order")
+        # A subject with no created day sorts after every dated one. Same day, then title.
+        created = c.get("created") if c["kind"] == "subject" else ""
         return (rank.get(c["name"], len(rank)),
                 own if isinstance(own, (int, float)) else 1e9,
                 c["kind"] != "folder",
+                created or "9999-99-99",
                 c["title"].casefold())
 
     children.sort(key=key)

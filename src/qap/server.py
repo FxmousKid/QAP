@@ -19,6 +19,14 @@ qa-stars:<qa-project>, and browsers keep localStorage per origin. Served from he
                                                                     "@id": remove_project, empty projects only)
   POST /api/project       {title, icon?, color?, id?}            -> layout.make_project
 
+  GET  /api/share              the saved share command and the variables of ?path=
+  GET  /api/share/file?path=   that built page, with a home directory rewritten to ~/.
+                               The download is named after the subject and the pass title.
+                               The file on disk is not changed.
+  POST /api/share/command      {command}  the shell text to save (not a path)
+  POST /api/share/run          {path}     run the saved command on a redacted copy.
+                               A command in the body is ignored.
+
   Plugins (qap.plugins):
   GET  /api/plugins                       every plugin, on or off, with its settings and commands
   POST /api/plugins/<id>/enable|disable   turn it on or off (saved, and loaded or unloaded right away)
@@ -55,7 +63,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.responses import FileResponse, JSONResponse, Response
 
-from . import icons, layout as L, plugins as PL, snapshot
+from . import config, icons, layout as L, plugins as PL, share, snapshot
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8750
@@ -254,6 +262,25 @@ def build_api(root: Path, plugins: PL.App) -> FastAPI:
         except L.LayoutError as e:
             return _json(500, {"ok": False, "error": str(e)})
 
+    @read("/api/share")
+    def api_share(request: Request) -> JSONResponse:
+        try:
+            payload = share.describe(request.app.state.root, request.query_params.get("path") or "")
+        except (L.LayoutError, ValueError, OSError) as e:
+            return _json(400, {"ok": False, "error": str(e)})
+        return _json(200, {"ok": True, **payload})
+
+    @read("/api/share/file")
+    def api_share_file(request: Request) -> Response:
+        rel = request.query_params.get("path") or ""
+        try:
+            name, data = share.redact_page(request.app.state.root, rel)
+        except (L.LayoutError, ValueError, OSError) as e:
+            return _json(400, {"ok": False, "error": str(e)})
+        headers = dict(_SECURITY)
+        headers["Content-Disposition"] = share.content_disposition(name)
+        return Response(data, media_type="text/html; charset=utf-8", headers=headers)
+
     @read("/api/plugins")
     def api_plugins(request: Request) -> JSONResponse:
         app = request.app.state.plugins
@@ -270,6 +297,8 @@ def build_api(root: Path, plugins: PL.App) -> FastAPI:
 
     @api.post("/api/{action:path}")
     def post_action(action: str, request: Request, body: JsonBody) -> JSONResponse:
+        if action in SHARE_POST:
+            return _share_post(request, action, body)
         handler = ACTIONS.get(action)
         if handler is None:
             return _json(404, {"ok": False, "error": f"no action {action!r}"})
@@ -282,6 +311,18 @@ def build_api(root: Path, plugins: PL.App) -> FastAPI:
         return _json(200, {"ok": True, **result})
 
     return api
+
+
+def _share_post(request: Request, action: str, body: dict) -> JSONResponse:
+    """Save or run the share command. Nothing in the content tree changes, so no content_changed event."""
+    try:
+        with request.app.state.lock:
+            result = SHARE_POST[action](request.app.state.root, body)
+    except share.NeedsCommand as e:
+        return _json(400, {"ok": False, "error": str(e), "needs_command": True})
+    except (L.LayoutError, ValueError, OSError) as e:
+        return _json(400, {"ok": False, "error": str(e)})
+    return _json(200, {"ok": True, **result})
 
 
 def _plugin_call(request: Request, method: str, pid: str, rest: str, body: dict) -> JSONResponse:
@@ -381,6 +422,21 @@ def act_rmdir(root: Path, body: dict) -> dict:
     return L.remove_folder(root, path)
 
 
+def act_share_command(root: Path, body: dict) -> dict:
+    command = body.get("command", "")
+    if not isinstance(command, str):
+        raise ValueError("command must be a string")
+    return {"command": config.write_share_command(command)}
+
+
+def act_share_run(root: Path, body: dict) -> dict:
+    # The command is the one in the config file. A command in this body is ignored.
+    path = body.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("path must be a built pass")
+    return share.run(root, path)
+
+
 def act_project(root: Path, body: dict) -> dict:
     title = (_text(body, "title") or "").strip()
     if not title:
@@ -396,6 +452,7 @@ def act_project(root: Path, body: dict) -> dict:
 
 ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_icon, "rmdir": act_rmdir,
            "project": act_project}
+SHARE_POST = {"share/command": act_share_command, "share/run": act_share_run}
 
 
 # ------------------------------------------------------------------ entry point

@@ -18,8 +18,12 @@ uv run --project . python -m unittest discover -s tests
 | The first project is the default. Every family that has no project yet belongs to it. | `src/qap/layout/project.py` | `tests.test_layout.Projects.test_first_project_is_the_default_and_holds_everything` |
 | Changing the default writes the previous default onto families that had none, so they stay in the project they already belonged to. | `src/qap/layout/project.py` | `tests.test_layout.Projects.test_a_new_default_never_moves_existing_folders` |
 | With no projects file, the tree is the list of families. | `src/qap/layout/read.py` | `tests.test_layout.Projects.test_no_projects_reads_as_before` |
+| Subjects in a folder are listed by the day they were created, oldest first. A subject with no day goes last. An order list in the folder still wins. | `src/qap/layout/read.py` | `tests.test_layout.Reading.test_subjects_are_sorted_by_when_they_were_created` |
 | remove_folder removes an empty folder. A folder that still holds a subject stays. | `src/qap/layout/write.py` | `tests.test_layout.Writing.test_remove_folder_only_when_empty` |
 | A dashboard write is accepted when Host and Origin are this server. | `src/qap/server.py` | `tests.test_cli_server.Server.test_writes_are_guarded_and_work` |
+| A downloaded or shared copy rewrites a home directory to ~/. The command that runs is the one saved in config. | `src/qap/share.py` | `tests.test_share.Run.test_the_saved_command_sends_a_redacted_copy` |
+| The share preview substitutes the pass into the saved command and double-quotes every value. | `src/qap/share.py` | `tests.test_share.Preview.test_values_are_double_quoted` |
+| A downloaded copy is named after the subject and the pass title. | `src/qap/share.py` | `tests.test_share.Redact.test_the_download_is_named_after_the_pass` |
 | A plugin that raises while loading is left off, and qap keeps running. | `src/qap/plugins.py` | `tests.test_plugins.Lifecycle.test_a_broken_plugin_never_breaks_qap` |
 | Unload removes the commands, routes and events that onload added. | `src/qap/plugins.py` | `tests.test_plugins.Lifecycle.test_unload_removes_everything_onload_added` |
 | Enabling a community plugin is done with qap plugins enable. The dashboard answers 403. | `src/qap/plugins.py` | `tests.test_plugins.ServerRoutes.test_writes_are_guarded_and_enable_disable_live` |
@@ -54,6 +58,7 @@ Run the command for the files you edited. Prefix it with `uv run --project .` so
 | `src/qap/search.py` `src/qap/web/fuzzy.js` | `python -m unittest tests.test_search` |
 | `src/qap/plugin.py` `src/qap/plugins.py` `src/qap/plugin_cli.py` | `python -m unittest tests.test_plugins` |
 | `src/qap/server.py` `src/qap/cli.py` `src/qap/snapshot.py` | `python -m unittest tests.test_cli_server tests.test_snapshot` |
+| `src/qap/share.py` | `python -m unittest tests.test_share` |
 | `src/qap/core_plugins/git-storage/` | `python -m unittest tests.test_git_storage` |
 | `skill/scripts/build.py` | `python -m unittest tests.test_build` |
 | `skill/scripts/carry.py` `skill/scripts/check.py` `skill/scripts/html_span.py` `src/qap/skill.py` | `python -m unittest tests.test_pages` |

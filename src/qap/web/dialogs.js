@@ -6,6 +6,10 @@ export { el };
 
 // ---- toast: one line at the bottom, with an optional action (Undo) ----
 let toastTimer = 0;
+export function hideToast() {
+  clearTimeout(toastTimer);
+  document.getElementById("toast")?.classList.remove("show");
+}
 export function toast(message, { error = false, action = null, ms = action ? 10000 : 5000 } = {}) {
   const box = document.getElementById("toast");
   box.onmouseenter = () => clearTimeout(toastTimer);
@@ -48,7 +52,7 @@ document.addEventListener("pointerdown", (e) => { if (openMenu && !openMenu.node
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 
 // ---- a modal dialog holding a form; resolves with the form's result, or null when cancelled ----
-export function dialog(title, build, submitLabel = "Save") {
+export function dialog(title, build, submitLabel = "Save", className = "") {
   return new Promise((resolve) => {
     const err = el("p", { class: "err" });
     const body = el("div");
@@ -58,7 +62,7 @@ export function dialog(title, build, submitLabel = "Save") {
       el("div", { class: "row" },
         el("button", { class: "btn", type: "button", text: "Cancel", onclick: () => finish(null) }),
         submitLabel ? el("button", { class: "btn primary", type: "submit", text: submitLabel }) : null));
-    const dlg = el("dialog", { class: "dlg" }, form);
+    const dlg = el("dialog", { class: className ? "dlg " + className : "dlg" }, form);
     const finish = (value) => { dlg.close(); dlg.remove(); resolve(value); };
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -71,7 +75,7 @@ export function dialog(title, build, submitLabel = "Save") {
     body.addEventListener("qap:done", (e) => finish(e.detail));
     document.body.append(dlg);
     dlg.showModal();
-    dlg.querySelector("input")?.focus();
+    (dlg.querySelector("textarea") || dlg.querySelector("input") || dlg.querySelector(".btn.primary"))?.focus();
   });
 }
 

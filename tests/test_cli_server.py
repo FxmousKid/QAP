@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -131,6 +132,14 @@ class CLI(unittest.TestCase):
         code, out = self.q("config")
         self.assertEqual((code, out["content_root"], out["content_root_from"]), (0, str(self.root), "--root"))
 
+    def test_share_command_is_text(self):
+        cfg = Path(self.tmp.name) / "cfg"
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(cfg)}):
+            code, out = run("config", "share_command", 'share --qa-pass "$PASS_PATH"', "--json")
+        self.assertEqual((code, out["share_command"]), (0, 'share --qa-pass "$PASS_PATH"'))
+        saved = json.loads((cfg / "qap" / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["share_command"], 'share --qa-pass "$PASS_PATH"')
+
 
 class Server(unittest.TestCase):
     def setUp(self):
@@ -214,6 +223,48 @@ class Server(unittest.TestCase):
         self.assertEqual(json.loads(body)["icon"], "🧪")
         code, body = self.req("/api/rename", {"path": "work/interaction", "title": "Interaction v3"})
         self.assertEqual(L.read_json(self.root / "work/interaction/subject.json")["title"], "Interaction v3")
+
+    def test_share_download_uses_the_saved_command(self):
+        page = self.root / "db/interaction/QA-PASS-1.html"
+        page.write_text("<p>Stored at /Users/iyan/Desktop/QA-PASS-1.html</p>", encoding="utf-8")
+        cfg = Path(self.tmp.name) / "cfg"
+        seen = {}
+
+        def launch(command, env, timeout, cwd=None):
+            seen["command"] = command
+            return subprocess.CompletedProcess(
+                ["zsh"], 0, stdout="https://share.example/a/QA-PASS-1.html\n", stderr="")
+
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(cfg)}), \
+                mock.patch("qap.share.launch", launch):
+            code, body = self.req("/api/share/file?path=db/interaction/QA-PASS-1.html")
+            self.assertEqual(code, 200)
+            ask = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/api/share/file?path=db/interaction/QA-PASS-1.html")
+            with urllib.request.urlopen(ask) as resp:
+                self.assertIn('filename="Interaction.html"', resp.headers["Content-Disposition"])
+            self.assertNotIn(b"/Users/iyan", body)
+            self.assertIn(b"~/Desktop/QA-PASS-1.html", body)
+            self.assertIn("/Users/iyan", page.read_text(encoding="utf-8"))
+            self.assertEqual(self.req("/api/share/file?path=db/interaction/QA-PASS-1.html",
+                                      headers={"Host": "evil.example"})[0], 421)
+            self.assertEqual(self.req("/api/share/file?path=db/interaction/subject.json")[0], 400)
+            code, body = self.req("/api/share/run", {"path": "db/interaction/QA-PASS-1.html", "command": "echo pwned"})
+            self.assertEqual(code, 400)
+            self.assertTrue(json.loads(body)["needs_command"])
+            self.assertNotIn("command", seen)
+            code, body = self.req("/api/share/command", {"command": 'printf "$PASS_FILE"'})
+            self.assertEqual((code, json.loads(body)["command"]), (200, 'printf "$PASS_FILE"'))
+            code, body = self.req("/api/share/run",
+                                  {"path": "db/interaction/QA-PASS-1.html", "command": "echo pwned"},
+                                  {"Origin": "http://evil.example"})
+            self.assertEqual(code, 403)
+            code, body = self.req("/api/share/run", {"path": "db/interaction/QA-PASS-1.html", "command": "echo pwned"})
+            self.assertEqual(code, 200)
+            data = json.loads(body)
+            self.assertEqual(seen["command"], 'printf "$PASS_FILE"')
+            self.assertEqual(data["url"], "https://share.example/a/QA-PASS-1.html")
+            self.assertIn("/Users/iyan", page.read_text(encoding="utf-8"))
 
     def test_a_changed_pass_shows_up_on_the_next_read(self):
         first = self.req("/api/tree")[1]

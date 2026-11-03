@@ -27,6 +27,7 @@ EPILOG = """examples:
   qap project move side-projects personal   put a top-level folder (a family) in a project
   qap place ~/old/choices brain/prd16       move a folder of passes in; leaves a symlink behind
   qap serve --open                          the dashboard on http://127.0.0.1:8750
+  qap config share_command 'share --qa-pass "$PASS_PATH" --family "$FAMILY" --subject "$SUBJECT" --pass "$PASS"'
   qap plugins                               plugins: core (git-storage) and community ones
   qap storage git init --remote <url>       back the content up in a git remote (git-storage plugin)
 """
@@ -102,9 +103,17 @@ def go_ahead(args, text: str) -> None:
 # ---------------------------------------------------------------------------- commands
 
 def cmd_config(args) -> None:
-    if args.key:
+    known = (*config.KEYS, "share_command")
+    if args.key == "share_command":
+        if args.unset:
+            config.write_share_command(None)
+        elif args.value:
+            config.write_share_command(args.value)
+        elif prompt.interactive(args):
+            config.write_share_command(prompt.ask("share_command", config.share_command()))
+    elif args.key:
         if args.key not in config.KEYS:
-            raise Fail(f"unknown key {args.key!r}; known: {', '.join(config.KEYS)}")
+            raise Fail(f"unknown key {args.key!r}; known: {', '.join(known)}")
         if args.unset:
             config.write_config(args.key, None)
         elif args.value:
@@ -113,12 +122,15 @@ def cmd_config(args) -> None:
             config.write_config(args.key, prompt.ask(f"{args.key}", str(getattr(config, args.key)()[0])))
     root, root_from = config.content_root(getattr(args, "root", None))
     sk, sk_from = config.skill_dir()
+    command = config.share_command()
     data = {"config_file": str(config.config_path()), "content_root": str(root), "content_root_from": root_from,
-            "content_root_exists": root.is_dir(), "skill_dir": str(sk), "skill_dir_from": sk_from}
+            "content_root_exists": root.is_dir(), "skill_dir": str(sk), "skill_dir_from": sk_from,
+            "share_command": command}
     emit(args, data, "\n".join([
         f"config file   {data['config_file']}",
         f"content_root  {root}  (from {root_from}{'' if root.is_dir() else ', MISSING'})",
         f"skill_dir     {sk}  (from {sk_from})",
+        f"share_command {command or '(not set)'}",
     ]))
 
 
@@ -501,7 +513,7 @@ def parser(app: plugins.App | None = None) -> argparse.ArgumentParser:
         p.set_defaults(fn=fn)
         return p
 
-    p = add("config", cmd_config, "show the configuration, or set a key (content_root, skill_dir)")
+    p = add("config", cmd_config, "show the configuration, or set a key (content_root, skill_dir, share_command)")
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")
     p.add_argument("--unset", action="store_true", help="remove the key from the config file")

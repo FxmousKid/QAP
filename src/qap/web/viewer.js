@@ -1,19 +1,37 @@
 // The subject view: one pass in a large frame, and a selector made for subjects with 40+ passes:
 // ‹ › steps, a strip of every pass number, and a searchable list (click "Pass N", or press /). The search over
-// everything sits just left of ‹.
+// everything sits just left of ‹. Fold, just left of Share, lifts the bar off; one button at the window's
+// top right puts it back.
 // Keys: ← → (or [ ]) older / newer, Home / End first / latest, / the pass list, ⌘K (Ctrl+K) the search.
 // [ ], / and ⌘K also work inside the page.
 import { contentUrl } from "./api.js";
 import { el } from "./dialogs.js";
 import { href, shortDate } from "./tiles.js";
 import { searchButton, openSearch, isShortcut } from "./search.js";
+import { shareButton } from "./share.js";
 
 let current = null; // {node, index, frame, strip, pick}
+
+// Remembered with the theme, so the next pass opens the same way.
+const FOLD_KEY = "qap-bar-folded";
+let folded = false;
+try { folded = localStorage.getItem(FOLD_KEY) === "1"; } catch (e) {}
+
+// Built pages carry their own Share and theme. While one is framed, this bar owns both, so the page's
+// copies are hidden. The theme button stays in the page: a click on it still follows the dashboard.
+// 52px is the unfold button's reach from the window's right (style.css #unfold: 12px + 30px + a gap).
+const FRAMED_CSS = `
+#theme-toggle,#share-open,#share-menu,#share-note{display:none !important}
+#search-open{right:calc(var(--edge) + var(--stars-w, 112px) + 8px) !important}
+html.qap-bar-folded #stars-open{right:max(var(--edge), 52px) !important}
+html.qap-bar-folded #search-open{right:calc(max(var(--edge), 52px) + var(--stars-w, 112px) + 8px) !important}
+`;
 
 export function leaveViewer() {
   current = null;
   document.body.classList.remove("viewing");
   closeList();
+  applyBar();
 }
 
 function indexOf(node, label) {
@@ -57,9 +75,58 @@ export function renderViewer(view, tools, node, params) {
   current.frame.title = `${node.title}, pass ${pass.label}`;
   tools.replaceChildren(passNav(node, index));
   document.title = `${node.title} · pass ${pass.label} — QA passes`;
-  const bar = document.querySelector(".bar");
-  document.documentElement.style.setProperty("--bar-h", bar.offsetHeight + "px");
+  applyBar();
 }
+
+function fitBar() {
+  const bar = document.querySelector(".bar");
+  if (bar) document.documentElement.style.setProperty("--bar-h", bar.offsetHeight + "px");
+}
+window.addEventListener("resize", () => { if (document.body.classList.contains("viewing")) fitBar(); });
+
+function applyBar() {
+  document.body.classList.toggle("bar-folded", folded && document.body.classList.contains("viewing"));
+  fitBar();
+  paintFrameChrome();
+}
+
+function setFolded(on) {
+  folded = on;
+  try { localStorage.setItem(FOLD_KEY, on ? "1" : "0"); } catch (e) {}
+  if (on) closeList();
+  applyBar();
+}
+
+function chevron(up) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", up ? "M6 14.5 12 8.5 18 14.5" : "M6 9.5 12 15.5 18 9.5");
+  svg.append(path);
+  return svg;
+}
+
+// The page's own buttons are already in the built file, so the frame is told directly.
+function paintFrameChrome() {
+  const frame = current?.frame;
+  if (!frame) return;
+  let doc;
+  try { doc = frame.contentDocument; } catch (x) { return; }
+  const root = doc?.documentElement;
+  if (!root) return;
+  let style = doc.getElementById("qap-framed");
+  if (!style) {
+    style = doc.createElement("style");
+    style.id = "qap-framed";
+    style.textContent = FRAMED_CSS;
+    (doc.head || root).append(style);
+  }
+  root.classList.toggle("qap-bar-folded", document.body.classList.contains("bar-folded"));
+  try { frame.contentWindow.dispatchEvent(new Event("resize")); } catch (x) {}
+}
+
+document.getElementById("unfold")?.addEventListener("click", () => setFolded(false));
 
 function passNav(node, index) {
   const passes = node.passes;
@@ -74,6 +141,8 @@ function passNav(node, index) {
   const strip = el("div", { class: "strip", role: "navigation", "aria-label": "Passes" },
     passes.map((p, i) => el("a", { href: href(node.path, i === passes.length - 1 ? "" : "pass=" + encodeURIComponent(p.label)),
       "aria-current": String(i === index), title: `${p.title || p.file} · ${shortDate(p.mtime)}`, text: p.label })));
+  const fold = el("button", { class: "iconbtn fold", type: "button", title: "Fold the bar", "aria-label": "Fold the bar",
+    onclick: () => setFolded(true) }, chevron(true));
   const open = el("a", { class: "iconbtn open-page", href: contentUrl(node.path, pass.file), target: "_blank",
     title: "Open this pass alone, in a new tab", text: "↗" });
   if (current) current.pick = pick;
@@ -81,7 +150,7 @@ function passNav(node, index) {
     const on = strip.querySelector('[aria-current="true"]');
     if (on) strip.scrollLeft = on.offsetLeft - strip.clientWidth / 2 + on.offsetWidth / 2;
   });
-  return el("div", { class: "passnav" }, searchButton({ compact: true }), prev, pick, next, strip, open);
+  return el("div", { class: "passnav" }, searchButton({ compact: true }), prev, pick, next, strip, fold, shareButton(node, pass), open);
 }
 
 // ---- the searchable list ----
@@ -156,6 +225,8 @@ function followFrame(frame) {
 }
 
 function wireFrame(frame) {
+  if (!current || current.frame !== frame) return;
+  paintFrameChrome();
   let doc;
   try { doc = frame.contentDocument; } catch (x) { return; }
   if (!doc || doc.__qapWired) return;

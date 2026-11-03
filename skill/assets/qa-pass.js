@@ -57,13 +57,15 @@
     placeTop();  // the top row's buttons moved (window width, star count): the back button's room follows
   }
 
-  // The right-hand buttons sit side by side from the right edge: View ★s, the theme toggle, then Search. Each one's
-  // offset is the widths of those right of it, which change with the star count and the theme label.
+  // The right-hand buttons sit side by side from the right edge: View ★s, the theme toggle, Share, then Search.
+  // Each one's offset is the widths of those right of it, which change with the star count and the theme label.
   function placeTop() {
     var stars = document.getElementById("stars-open");
     var theme = document.getElementById("theme-toggle");
+    var share = document.getElementById("share-open");
     if (stars) root.style.setProperty("--stars-w", stars.offsetWidth + "px");
     if (theme) root.style.setProperty("--theme-w", theme.offsetWidth + "px");
+    if (share) root.style.setProperty("--share-w", share.offsetWidth + "px");
     placeBack();
   }
 
@@ -314,7 +316,7 @@
     // arrow ("+N" becomes a corner badge; the full label stays in its tooltip and aria-label); with none (the
     // smallest phones) it moves to the bottom left corner.
     var toc = document.getElementById("toc-toggle");
-    var first = document.getElementById("search-open") || document.getElementById("theme-toggle");  // the right group's leftmost
+    var first = document.getElementById("search-open") || document.getElementById("share-open") || document.getElementById("theme-toggle");  // the right group's leftmost
     var b = document.getElementById("back-to-link");
     var left = toc ? toc.getBoundingClientRect().right + 8 : 16;
     var room = Math.floor((first ? first.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
@@ -576,7 +578,203 @@
     });
   }
 
+  // Keep this in step with qap.share.redact: a home directory becomes ~, and a URL like
+  // https://example.com/home/ivan is left alone (a letter sits against the slash).
+  var HOME_PATH = /(?<![A-Za-z0-9._-])(?:(?:file:\/\/(?:localhost)?)?(?:\/Users|\/home)\/[^/\s"'<>]+|%2F(?:Users|home)%2F(?:%[0-9A-Fa-f]{2}|[^%/\s"'<>])+)/gi;
+
+  function redactText(text) {
+    HOME_PATH.lastIndex = 0;
+    return String(text).replace(HOME_PATH, function (raw) {
+      var core = raw.replace(/[.,;:)\]}>]+$/, "");
+      return "~" + raw.slice(core.length);
+    });
+  }
+
+  function qapHost() {
+    return /^https?:$/.test(location.protocol) && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(location.host);
+  }
+
+  function passRel() {
+    var path = location.pathname;
+    try { path = decodeURIComponent(path); } catch (e) { /* keep the raw path */ }
+    return path.indexOf("/c/") === 0 ? path.slice(3).replace(/^\/+/, "") : "";
+  }
+
+  function downloadName(res, fallback) {
+    var disp = (res && res.headers && res.headers.get("Content-Disposition")) || "";
+    var star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+    if (star) {
+      try { return decodeURIComponent(star[1].trim()); } catch (e) { /* the plain name below */ }
+    }
+    var plain = /filename="([^"]*)"/.exec(disp);
+    return (plain && plain[1]) || fallback || "QA-PASS.html";
+  }
+
+  function downloadBlob(blob, name) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name || "QA-PASS.html";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
+  }
+
+  function downloadDocument() {
+    var name = "QA-PASS.html";
+    try { name = decodeURIComponent((location.pathname.split("/").pop() || name).split("?")[0]); } catch (e) {}
+    downloadBlob(new Blob(["<!DOCTYPE html>\n" + redactText(document.documentElement.outerHTML)], { type: "text/html" }), name);
+  }
+
+  function downloadFromServer() {
+    var rel = passRel();
+    if (!rel || !qapHost()) { downloadDocument(); return; }
+    fetch("/api/share/file?path=" + encodeURIComponent(rel)).then(function (res) {
+      if (!res.ok) { downloadDocument(); return; }
+      return res.blob().then(function (blob) { downloadBlob(blob, downloadName(res, rel.split("/").pop())); });
+    }, downloadDocument);
+  }
+
+  function shareNote(text) {
+    var note = document.getElementById("share-note");
+    if (!note) {
+      note = document.createElement("div");
+      note.id = "share-note";
+      note.setAttribute("role", "status");
+      document.body.appendChild(note);
+    }
+    note.textContent = text;
+    note.hidden = false;
+    clearTimeout(note.qapTimer);
+    note.qapTimer = setTimeout(function () { note.hidden = true; }, 12000);
+  }
+
+  function sendFromPage() {
+    var rel = passRel();
+    if (!rel) { shareNote("Open this pass from the dashboard to send it."); return; }
+    fetch("/api/share?path=" + encodeURIComponent(rel)).then(function (res) { return res.json(); }).then(function (info) {
+      if (!info.ok) throw new Error(info.error || "could not read the share command");
+      openSharePreview(info, rel);
+    }).catch(function (err) { shareNote(err.message || "could not read the share command"); });
+  }
+
+  function openSharePreview(info, rel) {
+    var old = document.getElementById("share-dialog");
+    if (old) old.remove();
+    var ready = !!(info.command && String(info.command).trim());
+    var dlg = document.createElement("dialog");
+    dlg.id = "share-dialog";
+    var form = document.createElement("form");
+    var title = document.createElement("h3");
+    title.textContent = ready ? "Send this pass" : "Share command";
+    var hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = ready
+      ? "The template is the one in the config. Each value is in double quotes. The copy's directory is chosen when you send."
+      : "Set the template on this machine. The page keeps no command of its own.";
+    var pre = document.createElement("pre");
+    pre.className = "cmd";
+    pre.textContent = ready ? (info.preview || "") : "qap config share_command '" + (info.suggested || "") + "'";
+    var row = document.createElement("div");
+    row.className = "row";
+    var cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "sd-btn";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", function () { dlg.close(); });
+    row.appendChild(cancel);
+    if (ready) {
+      var go = document.createElement("button");
+      go.type = "submit";
+      go.className = "sd-btn";
+      go.textContent = "Send";
+      row.appendChild(go);
+    }
+    form.appendChild(title);
+    form.appendChild(hint);
+    form.appendChild(pre);
+    form.appendChild(row);
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      dlg.close();
+      shareNote("Sending…");
+      fetch("/api/share/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: rel }),
+      }).then(function (res) {
+        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+      }).then(function (r) {
+        if (!r.ok) throw new Error((r.data && r.data.error) || "send failed");
+        shareNote(r.data.url || (r.data.stdout || "Sent").trim() || "Sent");
+      }).catch(function (err) { shareNote(err.message || "send failed"); });
+    });
+    dlg.appendChild(form);
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    document.body.appendChild(dlg);
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
+    (goButton(row) || cancel).focus();
+  }
+
+  function goButton(row) {
+    return row.querySelector("button[type=submit]");
+  }
+
+  function closeShareMenu() {
+    var menu = document.getElementById("share-menu");
+    if (menu) menu.remove();
+  }
+
+  function toggleShareMenu(anchor) {
+    if (document.getElementById("share-menu")) { closeShareMenu(); return; }
+    var menu = document.createElement("div");
+    menu.id = "share-menu";
+    menu.setAttribute("role", "menu");
+    [["Download HTML", downloadFromServer], ["Send", sendFromPage]].forEach(function (item) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "menuitem");
+      b.textContent = item[0];
+      b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        closeShareMenu();
+        item[1]();
+      });
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    var r = anchor.getBoundingClientRect();
+    menu.style.top = (r.bottom + 6) + "px";
+    menu.style.right = Math.max(8, window.innerWidth - r.right) + "px";
+  }
+
+  function setupShare() {
+    if (document.getElementById("share-open")) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "topbtn";
+    b.id = "share-open";
+    b.textContent = "Share";
+    b.title = "Download this page, or send it with the saved command";
+    b.setAttribute("aria-haspopup", "menu");
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!qapHost()) { downloadDocument(); return; }
+      toggleShareMenu(b);
+    });
+    var theme = document.getElementById("theme-toggle");
+    if (theme) theme.parentNode.insertBefore(b, theme);
+    else document.body.appendChild(b);
+    document.addEventListener("click", function (e) {
+      var menu = document.getElementById("share-menu");
+      if (!menu || menu.contains(e.target) || e.target === b) return;
+      closeShareMenu();
+    });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeShareMenu(); });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    setupShare();
     setTheme(root.dataset.theme || "light");
     detectScreen();
     watchPixelRatio();

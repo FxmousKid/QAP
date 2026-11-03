@@ -11,6 +11,9 @@ skill_dir (build.py, check.py, carry.py, the template), first match wins:
   2. config.json {"skill_dir": "..."}
   3. <repo>/skill, when qap runs from its repo (uv run --project, bin/qap)
   4. ~/.claude/skills/qa-pass (the symlink the skill is installed through; works after `uv tool install`)
+
+share_command is the shell text the Share button runs. It is stored as written.
+It is not a path, so it does not go through write_config.
 """
 from __future__ import annotations
 
@@ -46,10 +49,43 @@ def write_config(key: str, value: str | None) -> dict:
         data.pop(key, None)
     else:
         data[key] = str(Path(value).expanduser().resolve())
+    _write(data)
+    return data
+
+
+def share_command() -> str:
+    """The shell text the Share button runs. Empty when it has not been set."""
+    value = read_config().get("share_command")
+    return value if isinstance(value, str) else ""
+
+
+def write_share_command(value: str | None) -> str:
+    """Store the command as text. A blank value removes it. A path is not resolved."""
+    if value is None:
+        stored = ""
+    else:
+        if not isinstance(value, str):
+            raise ValueError("share_command must be a string")
+        if "\x00" in value:
+            raise ValueError("share_command cannot contain a NUL")
+        stored = value.replace("\r\n", "\n").rstrip("\n")
+        if len(stored) > 4000:
+            raise ValueError("share_command is too long")
+        if not stored.strip():
+            stored = ""
+    data = read_config()
+    if stored:
+        data["share_command"] = stored
+    else:
+        data.pop("share_command", None)
+    _write(data)
+    return stored
+
+
+def _write(data: dict) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return data
 
 
 def content_root(override: str | None = None) -> tuple[Path, str]:

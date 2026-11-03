@@ -18,7 +18,8 @@ symlink stays valid; a tree without projects.json reads exactly as before. A pro
 a path is expected ("@work"): '@' never starts a folder name, so the two cannot clash.
 
 folder.json "order" is either a number (this folder's rank among its siblings) or a list of child names
-(the order of this folder's children). Children not named in a list follow, folders first, then by title.
+(the order of this folder's children). Children not named in a list follow, folders first, then subjects
+by the day they were created (oldest first; a subject with no day last), then by title.
 
 Every mutation the CLI and the dashboard make goes through the functions below (make_folder, make_subject,
 move, set_meta, place, make_project, assign_project, remove_project), so both write the same manifests.

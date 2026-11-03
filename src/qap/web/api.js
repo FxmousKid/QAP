@@ -23,6 +23,8 @@ export const api = {
   rename: (path, title) => call("/api/rename", { path, title }),
   icon: (path, icon, color) => call("/api/icon", { path, icon, color }),
   rmdir: (path) => call("/api/rmdir", { path }),
+  shareInfo: (path) => call("/api/share?path=" + encodeURIComponent(path)),
+  shareRun: (path) => call("/api/share/run", { path }),
 };
 
 // A page of the content, as the server serves it.
