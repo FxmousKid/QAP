@@ -414,6 +414,7 @@
     b.id = "back-to-link";
     b.hidden = true;
     b.innerHTML = '<span class="bk-arrow" aria-hidden="true">↩</span><span class="bk-text">Back</span><span class="bk-more"></span>';
+    b.addEventListener("click", goBack);
     document.body.appendChild(b);
     return b;
   }
