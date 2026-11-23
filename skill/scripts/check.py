@@ -9,7 +9,9 @@ Problems (must fix):
   - a .msg without an id, or a duplicate id (stars and deep links need stable, unique ids);
   - a .msg without its .who line; an AI message whose label is not the expanded {{AI:…}} logo + name + model;
   - the old format: .q / "You" blocks, or .me / .you blocks in folds ("Me" is the user, never the AI);
-  - a link <a href="#x"> whose id x does not exist in the page.
+  - a link <a href="#x"> whose id x does not exist in the page;
+  - in a triage pass (<meta name="qa-kind" content="triage">): a topic in no group, a session group without a
+    folder name, a file two groups own, a group waiting for one that is not there (triage.py reads the groups).
 Warnings (think twice):
   - a section title or a chip that uses a decision code (A1, C, D1…) without its meaning next to it
     ("D1 (drop the Langfuse ids)" or "… (D1)" is fine; "D1 built" is not): say what it means;
@@ -22,6 +24,8 @@ Warnings (think twice):
 """
 from __future__ import annotations
 
+import importlib.util
+import pathlib
 import re
 import sys
 from collections import Counter
@@ -195,12 +199,24 @@ class Scan(HTMLParser):
         self.recent = (self.recent + data)[-80:]
 
 
+def _load_triage():
+    """The triage reader lives next to this script; qap split runs the same file."""
+    key = "qap_skill_triage"
+    if key not in sys.modules:
+        spec = importlib.util.spec_from_file_location(key, pathlib.Path(__file__).resolve().parent / "triage.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[key] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules[key]
+
+
 def main(path: str) -> int:
     with open(path, encoding="utf-8") as f:
         html = f.read()
     scan = Scan()
     scan.feed(html)
     problems, warnings = [], []
+    problems += _load_triage().read(html)["problems"]
     if re.search(r"\{\{[A-Z_]+(?::[^}]*)?\}\}", html):
         problems.append("unbuilt placeholders left: run build.py")
     sections = [h for h in scan.h2 if h["text"].strip()]

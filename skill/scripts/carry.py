@@ -16,6 +16,8 @@ Subjects in --skip keep their last round open (settled subjects that get no new 
 --stars takes the text of the stars dialog's "Copy list" (a file, or "-" for stdin): its message ids
 (#p3-2a) are written into the new pass as a seed, which the page merges once into the browser's stars.
 That carries the stars even when the browser keeps them per file (some viewers do).
+Every <figure> of the previous pass first gets its number stamped (data-fig="P.K", see
+html_span.figure_labels), so a figure keeps its number in every later pass.
 Everything else (header, lede, closing sections) is copied unchanged: rewrite those by hand.
 """
 from __future__ import annotations
@@ -163,6 +165,8 @@ def main() -> int:
     ap.add_argument("--stars", default="", help='file holding the "Copy list" text of the stars dialog ("-": stdin)')
     ns = ap.parse_args()
     src = pathlib.Path(ns.prev).read_text(encoding="utf-8")
+    prev_pass = re.search(r'<meta name="qa-pass" content="(\d+)"', src)
+    src = html_span.stamp_figures(src, int(prev_pass.group(1)) if prev_pass else ns.n - 1)  # numbers stay put
     skip = {s.strip() for s in ns.skip.split(",") if s.strip()}
     heads = _h2s(src)
     out, last, carried = [], 0, []

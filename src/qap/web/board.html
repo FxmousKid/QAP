@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAP board</title>
+<link rel="icon" href="/favicon.ico">
+<script>(function(){var r=document.documentElement,t=null;try{t=localStorage.getItem('qa-theme')}catch(e){}
+if(!t){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}r.dataset.theme=t})();</script>
+<style>
+/* The batch board: which group waits for you, and where every other one is. Read from GET /api/board every few
+   seconds; the states come from the sessions' hooks (the qap mod in the Claude app) and from qap status. */
+:root{--bg:#fbfaf8;--surface:#fff;--surface2:#f5f3ef;--ink:#14130f;--ink2:#4a4740;--ink3:#6f6a60;--rule:#e6e2d9;
+  --rule2:#d3cec2;--gold:#8a6200;--you:#7a1530;--you-bg:#fbecef;--ask:#6b4a00;--ask-bg:#fbf1d9;--good:#2f5a1c;
+  --good-bg:#eef5e8;--work:#1d4f9c;--work-bg:#e8eef9;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+:root[data-theme="dark"]{--bg:#131211;--surface:#1c1b19;--surface2:#232220;--ink:#f5f3ee;--ink2:#c3bfb4;--ink3:#9a9589;
+  --rule:#2c2a27;--rule2:#3c3935;--gold:#D9A21C;--you:#f08a9f;--you-bg:#3a1820;--ask:#e6b84d;--ask-bg:#33280f;
+  --good:#8fc46b;--good-bg:#1d2a16;--work:#8ab4f8;--work-bg:#18243a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+a{color:var(--gold)}
+header.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 24px;
+  border-bottom:1px solid var(--rule);background:var(--surface)}
+.crumbs{font:13px/1.3 var(--mono);color:var(--ink2);display:flex;gap:8px;flex-wrap:wrap}
+.crumbs a{color:var(--ink2);text-decoration:none}
+.links{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pill{font-size:13px;color:var(--ink);text-decoration:none;border:1px solid var(--rule2);border-radius:999px;padding:6px 12px;background:var(--surface)}
+.live{font:12px/1 var(--mono);color:var(--good);background:var(--good-bg);border-radius:999px;padding:6px 10px}
+.live.off{color:var(--ink3);background:var(--surface2)}
+.wrap{max-width:1280px;margin:0 auto;padding:28px 24px 48px}
+.kicker{font:700 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+h1{margin:6px 0 0;font-size:32px;line-height:1.15;letter-spacing:-.01em}
+.summary{margin:8px 0 0;color:var(--ink2);max-width:760px}
+.counts{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.counts span{font-size:14px;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:8px 12px}
+.counts span.you{font-weight:600;color:var(--you);background:var(--you-bg);border-color:transparent}
+.cols{display:flex;flex-wrap:wrap;gap:24px;margin-top:28px;align-items:flex-start}
+main{flex:999 1 640px;min-width:0;display:flex;flex-direction:column;gap:28px}
+aside{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px}
+h2{margin:0 0 10px;font:600 14px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+h2.you{color:var(--you)}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.card.big{box-shadow:0 1px 2px rgba(20,19,15,.06),0 4px 14px rgba(20,19,15,.06)}
+.card.dashed{background:var(--surface2);border-style:dashed}
+.top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline}
+.sm{font:12px/1.4 var(--mono);color:var(--ink3)}
+h3{margin:0;font-size:18px;line-height:1.3}
+.state{font-size:13px;font-weight:600;border-radius:999px;padding:4px 10px;white-space:nowrap}
+.state.you{color:var(--you);background:var(--you-bg)}
+.state.ask{color:var(--ask);background:var(--ask-bg)}
+.state.work{color:var(--work);background:var(--work-bg)}
+.state.idle{color:var(--ink3);background:var(--surface2)}
+.state.done{color:var(--good);background:var(--good-bg)}
+blockquote{margin:0;padding:10px 12px;background:var(--surface2);border-radius:8px;font-size:15px;white-space:pre-wrap}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font-size:14px;font-weight:600;color:#fff;background:#14130f;border-radius:8px;padding:11px 14px;text-decoration:none;border:0;cursor:pointer}
+:root[data-theme="dark"] .btn{background:#f5f3ee;color:#14130f}
+.btn2{font-size:14px;color:var(--ink);text-decoration:none;border:1px solid var(--rule2);border-radius:8px;padding:10px 14px;background:var(--surface);cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:16px 18px}
+.panel h2{font:600 15px/1.2 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;text-transform:none;letter-spacing:0;color:var(--ink)}
+.panel ul,.panel ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px;font-size:14px;line-height:1.4}
+.ev{display:flex;gap:10px}.ev .sm{flex:0 0 44px}
+.empty{color:var(--ink3);font-size:14px}
+.picker a{display:block;margin:8px 0}
+</style>
+</head>
+<body>
+<header class="bar">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">QAP</a><span aria-hidden="true">›</span><span id="crumb">Batches</span></nav>
+  <div class="links"><span class="live off" id="live">Connecting…</span><a class="pill" id="triage-link" href="#" hidden>Triage pass</a></div>
+</header>
+<div class="wrap" id="app"><p class="empty">Loading…</p></div>
+<script>
+(function () {
+  var app = document.getElementById("app");
+  var live = document.getElementById("live");
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
+  var ago = function (iso) {
+    var ms = Date.now() - Date.parse(iso || "");
+    if (!(ms >= 0)) return "";
+    var m = Math.round(ms / 60000);
+    return m < 1 ? "just now" : m < 60 ? m + " min" : Math.round(m / 60) + " h";
+  };
+  var clock = function (iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toTimeString().slice(0, 5); };
+  // The Claude app opens a session from a link of this shape (its session list gives the same links).
+  var appLink = function (id) { return "claude://claude.ai/epitaxy/" + encodeURIComponent(id); };
+
+  function stateOf(g) {
+    if (g.lane === "needs_you") return g.session.state === "permission"
+      ? ["ask", "Asks for a permission · " + ago(g.session.since)] : ["you", "Waits for your answer · " + ago(g.session.since)];
+    if (g.lane === "working") return ["work", "Working · " + ago(g.session.since)];
+    if (g.lane === "waits") return ["idle", "Waits for " + g.blocked_by.join(", ")];
+    if (g.lane === "stopped") return ["idle", "Session ended"];
+    if (g.lane === "done") return ["done", g.phase === "merged" ? "Merged" : "Done"];
+    return ["idle", "Not started"];
+  }
+
+  function card(g, big) {
+    var st = stateOf(g);
+    var meta = "Group " + g.order + " · topics " + g.topics.map(function (t) { return t.num; }).join(", ")
+      + (g.round ? " · round " + g.round : "") + " · " + g.phase.replace("_", " ");
+    var jump = g.session.app_id ? '<a class="btn" href="' + appLink(g.session.app_id) + '">Jump to session</a>' : "";
+    var round = g.page ? '<a class="btn2" href="' + esc(g.page) + '">Open round ' + esc(g.round) + "</a>" : "";
+    var pr = /^https?:\/\//i.test(g.pr || "") ? '<a class="btn2" href="' + esc(g.pr) + '">PR</a>' : "";
+    var start = !g.session.app_id && g.lane === "ready"
+      ? '<button class="btn2" type="button" data-copy="' + esc(g.first_prompt) + '">Copy its first prompt</button>' : "";
+    var quote = big && g.session.question ? "<blockquote>" + esc(g.session.question) + "</blockquote>" : "";
+    var owns = g.owns.length ? '<div class="sm">owns ' + esc(g.owns.join("; ")) + "</div>" : "";
+    return '<article class="card' + (big ? " big" : "") + (g.lane === "waits" ? " dashed" : "") + '">'
+      + '<div class="top"><div><div class="sm">' + esc(meta) + "</div><h3>" + esc(g.title) + "</h3></div>"
+      + '<span class="state ' + st[0] + '">' + esc(st[1]) + "</span></div>" + quote
+      + (g.note ? '<div class="sm">' + esc(g.note) + "</div>" : "") + owns
+      + '<div class="actions">' + jump + round + pr + start + "</div></article>";
+  }
+
+  function lane(title, list, cls, big) {
+    if (!list.length) return "";
+    return '<section><h2 class="' + (cls || "") + '">' + esc(title) + " · " + list.length + "</h2>"
+      + (big ? list.map(function (g) { return card(g, true); }).join("")
+        : '<div class="grid">' + list.map(function (g) { return card(g, false); }).join("") + "</div>") + "</section>";
+  }
+
+  function render(data, rules) {
+    var by = {};
+    data.groups.forEach(function (g) { by[g.name] = g; });
+    var pick = function (name) { return data.lanes[name].map(function (n) { return by[n]; }); };
+    var you = pick("needs_you");
+    var longest = you.map(function (g) { return Date.now() - Date.parse(g.session.since || ""); }).filter(function (x) { return x >= 0; });
+    var summary = you.length
+      ? you.length + (you.length === 1 ? " session waits" : " sessions wait") + " for you."
+        + (longest.length ? " The longest has waited " + ago(new Date(Date.now() - Math.max.apply(null, longest)).toISOString()) + "." : "")
+      : "No session waits for you.";
+    document.getElementById("crumb").textContent = data.title;
+    document.title = data.title + " · QAP board";
+    var tl = document.getElementById("triage-link");
+    if (data.triage.page) { tl.href = data.triage.page; tl.hidden = false; }
+    var fast = data.fast.map(function (f) {
+      return "<li>" + esc(f.topics.map(function (t) { return t.num; }).join(" + ")) + " · " + esc(f.topics.map(function (t) { return t.title; }).join("; ")) + "</li>";
+    }).join("");
+    var events = data.recent.map(function (e) {
+      var what = { started: "started", waiting: "ended its turn: it waits for you", answered: "you answered",
+        permission: "asks for a permission", ended: "session ended", spawned: "session opened in the app",
+        phase: "is now " + String(e.phase || "").replace("_", " "), note: "got a note" }[e.kind] || e.kind;
+      return '<li class="ev"><span class="sm">' + esc(clock(e.at)) + "</span><span>" + esc(e.group) + " " + esc(what) + "</span></li>";
+    }).join("");
+    var ledger = rules.slice(-8).reverse().map(function (r) {
+      return "<li>" + esc(r.rule) + '<div class="sm">' + esc((r.who || "?") + " · " + (r.where || "") + " · " + (r.date || "")) + "</div></li>";
+    }).join("");
+    var count = function (n, one, many) { return n + " " + (n === 1 ? one : many); };
+    app.innerHTML = '<div class="kicker">Batch board</div><h1>' + esc(data.title) + ": " + count(data.groups.length, "group", "groups")
+      + (data.fast.length ? " and " + count(data.fast.length, "fast-lane fix", "fast-lane fixes") : "") + "</h1>"
+      + '<p class="summary">' + esc(summary) + "</p>"
+      + '<div class="counts"><span class="you">' + you.length + " need you</span><span>" + data.lanes.working.length
+      + " working</span><span>" + data.lanes.waits.length + " wait for another group</span><span>"
+      + data.lanes.ready.length + " not started</span><span>" + data.lanes.done.length + " done</span></div>"
+      + '<div class="cols"><main>'
+      + (lane("Needs you", you, "you", true) || '<p class="empty">Nobody waits for you.</p>')
+      + lane("Working", pick("working")) + lane("Waits for another group", pick("waits"))
+      + lane("Session ended", pick("stopped")) + lane("Not started", pick("ready")) + lane("Done", pick("done"))
+      + (fast ? '<section><h2>Fast lane · one PR each, no session</h2><div class="panel"><ul>' + fast + "</ul></div></section>" : "")
+      + "</main><aside>"
+      + '<section class="panel"><h2>Decisions ledger · ' + rules.length + " rules</h2>" + (ledger ? "<ul>" + ledger + "</ul>" : '<p class="empty">No rule yet.</p>') + "</section>"
+      + '<section class="panel"><h2>Live events</h2>' + (events ? "<ol>" + events + "</ol>" : '<p class="empty">No event yet.</p>') + "</section>"
+      + "</aside></div>";
+  }
+
+  function picker() {
+    fetch("/api/batches", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      live.textContent = "Live"; live.className = "live";
+      app.innerHTML = '<div class="kicker">Batch boards</div><h1>Pick a batch</h1><div class="picker">'
+        + (d.batches.map(function (b) { return '<a href="#' + encodeURIComponent(b.path) + '">' + esc(b.title) + " · " + b.groups + " groups</a>"; }).join("")
+          || '<p class="empty">No batch yet: <code>qap new-batch &lt;family&gt;/&lt;batch&gt;</code>.</p>') + "</div>";
+    });
+  }
+
+  var timer = null;
+  function load() {
+    var batch = decodeURIComponent(location.hash.slice(1));
+    clearTimeout(timer);
+    if (!batch) { picker(); return; }
+    Promise.all([
+      fetch("/api/board?path=" + encodeURIComponent(batch), { cache: "no-store" }).then(function (r) { return r.json(); }),
+      fetch("/api/ledger?path=" + encodeURIComponent(batch), { cache: "no-store" }).then(function (r) { return r.json(); })
+    ]).then(function (res) {
+      if (!res[0].ok) { app.innerHTML = '<p class="empty">' + esc(res[0].error) + "</p>"; return; }
+      live.textContent = "Live"; live.className = "live";
+      render(res[0], res[1].decisions || []);
+    }, function () { live.textContent = "Offline"; live.className = "live off"; })
+      .then(function () { timer = setTimeout(function () { if (!document.hidden) load(); else timer = setTimeout(load, 5000); }, 5000); });
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-copy]");
+    if (!b) return;
+    navigator.clipboard.writeText(b.getAttribute("data-copy")).then(function () { b.textContent = "Copied"; });
+  });
+  window.addEventListener("hashchange", load);
+  load();
+})();
+</script>
+</body>
+</html>

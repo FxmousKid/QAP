@@ -11,8 +11,12 @@ Placeholders in the source:
                                  vendor: claude | openai | gemini | other. Example: {{AI:claude|Claude|Opus 5.5}}
   {{TOPBAR}}                  -> the fixed buttons: ☰ Contents (left), theme toggle + View ★s (right)
 
+Every <figure> is numbered "P.K" (pass P, its K-th figure; html_span.figure_labels): data-fig="P.K", id="fig-P-K"
+(unless it has an id), "Figure P.K" at the start of its caption, and a "Fig. P.K" badge just above its image.
+
 References become links (only when the target exists in the page; idempotent, so a built page builds the same):
   "subject 05", "subject 05's", "subjects 09 and 20", "subjects 04–14"  -> <a href="#p5">…</a> per number
+  "figure 2.3", "Figure 2.3", "fig. 2.3"                                -> the figure numbered 2.3
   each <li> of the first <ol> of the #need section gets id="need-N"; "need item 12", "need items 9 and 12" -> #need-N
   A need item named in a message of an earlier pass (a fold, or a skipped subject's open round) is an item of
   that pass's list, not this one's, so it links to the sibling page: QA-PASS-K.html#need-N.
@@ -22,6 +26,12 @@ References become links (only when the target exists in the page; idempotent, so
   This pass is <meta name="qa-pass">, else the number in the source's file name.
   Never inside <a>, <code>, <pre>, <script>, <style>, <title>, <summary>, <button>, chips, AI labels, tags or
   {{…}} placeholders.
+
+What moved since the last pass (pass 2 on; stamp_news): each subject h2 gets data-new="subject" (opened in this
+pass) or data-new="round" (a new round), data-since="P" (its latest pass) and data-asks="S R" (the decisions its
+AI message of this pass asks); h2#need gets data-items="K". Only the built page carries them, never the source.
+qa-pass.js draws them: a NEW sign on the contents pane's line and after the subject's number, the counts and an
+"Only what's new" filter at the top of the pane.
 
 The output is one HTML file with no external dependency: it opens offline and can be sent as is.
 The build refuses when a placeholder is left or an image is missing.
@@ -103,6 +113,7 @@ SEP = r"(?:\s*,\s*(?:and\s+|or\s+)?|\s+and\s+|\s+or\s+|\s*(?:–|-|&ndash;|&#821
 REF = re.compile(rf"\b(?P<word>subjects?|need\s+items?)(?P<gap>\s+|&nbsp;)(?P<first>{NUM})(?P<rest>(?:{SEP}{NUM})*)",
                  re.I)
 REST = re.compile(rf"({SEP})({NUM})", re.I)
+FIG = re.compile(r"\b(?P<word>fig(?:ure|\.)?)(?P<gap>\s+|&nbsp;)(?P<n>\d{1,2}\.\d{1,2})(?![\w.]\d)", re.I)
 
 
 def need_items(html: str) -> list[tuple[int, str | None, int]]:
@@ -137,6 +148,25 @@ def number_need_items(html: str) -> str:
         if own is None:
             html = html[:at] + f' id="need-{n}"' + html[at:]
     return html
+
+
+def number_figures(html: str, current: int | None) -> tuple[str, int]:
+    """Number every figure (see the module docstring). Idempotent: a built page builds the same."""
+    labels = html_span.figure_labels(html, current)
+    for tag, label in reversed(labels):
+        close = html.find("</figure>", tag.end)
+        close = len(html) if close < 0 else close
+        badge = f'<b class="fig-n">Figure {label}</b> '
+        cap = re.compile(r"<figcaption\b[^>]*>", re.I).search(html, tag.end, close)
+        if cap is None:
+            html = html[:close] + f"<figcaption>{badge.strip()}</figcaption>" + html[close:]
+        elif 'class="fig-n"' not in html[cap.end():cap.end() + 40]:
+            html = html[:cap.end()] + badge + html[cap.end():]
+        extra = "" if html_span.attr(tag.attrs, "data-fig") else f' data-fig="{label}"'
+        if html_span.attr(tag.attrs, "id") is None:
+            extra += f' id="fig-{label.replace(".", "-")}"'
+        html = html[:tag.end - 1] + extra + html[tag.end - 1:]
+    return html, len(labels)
 
 
 PASS_META = re.compile(r"<meta\s+name=\"qa-pass\"\s+content=\"(\d+)\"", re.I)
@@ -187,6 +217,80 @@ def _load_html_span():
 html_span = _load_html_span()
 
 
+# ---- what moved since the last pass ----------------------------------------------------------------------------
+# Stamped on the h2 of the built page only, never the source, so carry.py never moves a stale mark into the next
+# pass. Pass 1 gets nothing. qa-pass.js draws the NEW signs, the letters and the pane's counts from these.
+NEWS_ATTR = re.compile(r'\s+data-(?:new|since|asks|items)="[^"]*"')
+DECISION = re.compile(r"\bDecision\s+([A-Z]\d{0,2})(?![A-Za-z0-9])")
+SUBJECT_ID = re.compile(r"^p\d+$")
+
+
+def _msg_pass(attrs: str) -> int | None:
+    """The pass a .msg belongs to: its data-pass, else the number its id ends with (p3-4a)."""
+    found = html_span.attr(attrs, "data-pass")
+    if found is None:
+        own = MSG_ID_PASS.search(html_span.attr(attrs, "id") or "")
+        found = own.group(1) if own else None
+    return int(found) if found is not None and found.isdigit() else None
+
+
+def stamp_news(html: str, current: int | None) -> tuple[str, Counter]:
+    """Mark what moved in pass `current` (>= 2) on each subject h2 (id pN):
+      data-new="subject" data-since="N"  every message of the subject is from this pass
+      data-new="round"   data-since="N"  a round of this pass after older ones
+      data-since="P"                     nothing from this pass: unchanged since pass P
+      data-asks="S R"                    the decisions ("Decision S: …" in a div.call.violet) of its pass-N AI messages
+    and data-items="K" on h2#need, K its items. Idempotent: earlier marks are replaced."""
+    heads: list[dict] = []
+    divs: list[tuple[bool, int | None, bool]] = []  # open divs: (is a message, its pass, is an AI message)
+    for kind, _start, _end, tag in html_span.scan(html):
+        if kind != "tag" or tag is None:
+            continue
+        if tag.name == "h2" and not tag.closing:
+            heads.append({"tag": tag, "id": html_span.attr(tag.attrs, "id") or "", "passes": set(), "asks": []})
+        elif tag.name == "div" and tag.closing:
+            if divs:
+                divs.pop()
+        elif tag.name == "div" and not tag.self_closing:
+            cls = html_span.classes(tag.attrs)
+            if "msg" in cls:
+                p = _msg_pass(tag.attrs)
+                divs.append((True, p, "user" not in cls))
+                if heads and p is not None:
+                    heads[-1]["passes"].add(p)
+            else:
+                divs.append((False, None, False))
+                msg = next((d for d in reversed(divs) if d[0]), None)
+                if heads and msg and msg[2] and msg[1] == current and {"call", "violet"} <= cls:
+                    h4 = re.compile(r"<h4\b[^>]*>(.*?)</h4>", re.S | re.I).search(html, tag.end)
+                    code = DECISION.search(re.sub(r"<[^>]+>", "", h4.group(1))) if h4 else None
+                    if code and code.group(1) not in heads[-1]["asks"]:
+                        heads[-1]["asks"].append(code.group(1))
+    counts: Counter = Counter()
+    for head in reversed(heads):
+        tag, marks = head["tag"], ""
+        if current is not None and current >= 2:
+            if SUBJECT_ID.match(head["id"]) and head["passes"]:
+                latest = max(head["passes"])
+                if latest == current:
+                    state = "subject" if min(head["passes"]) == current else "round"
+                    marks = f' data-new="{state}"'
+                    counts[state] += 1
+                else:
+                    counts["unchanged"] += 1
+                marks += f' data-since="{latest}"'
+                if head["asks"]:
+                    marks += f' data-asks="{" ".join(head["asks"])}"'
+                    counts["asks"] += 1
+            elif head["id"] == "need":
+                marks = f' data-items="{len(need_items(html))}"'
+        old = html[tag.start:tag.end]
+        new = NEWS_ATTR.sub("", old)
+        new = new[:-1] + marks + ">" if not new.endswith("/>") else new[:-2] + marks + "/>"
+        html = html[:tag.start] + new + html[tag.end:]
+    return html, counts
+
+
 class _Link:
     """Link "subject NN" and "need item N" in one pass over the page."""
 
@@ -194,6 +298,8 @@ class _Link:
         self.html = html
         self.src = src
         self.ids = set(re.findall(r"\bid=\"([^\"]+)\"", html))
+        self.figs = {html_span.attr(t.attrs, "data-fig"): html_span.attr(t.attrs, "id")
+                     for t, _ in html_span.figure_labels(html, None) if html_span.attr(t.attrs, "data-fig")}
         self.need = {n: own for n, own, _ in need_items(html) if own}
         self.current = this_pass(html, src)
         self.sibling_need: dict[int, dict[int, str]] = {}  # pass -> its page's need ids, read once
@@ -254,7 +360,15 @@ class _Link:
                 return piece + m.group("rest")
             return piece + REST.sub(more, m.group("rest"))
 
-        return REF.sub(one, text)
+        def fig(m: re.Match[str]) -> str:
+            own = self.figs.get(m.group("n"))
+            if not own:
+                self.unresolved.append(f"figure {m.group('n')}")
+                return m.group(0)
+            self.made["figure"] += 1
+            return f'<a href="#{own}">{m.group(0)}</a>'
+
+        return FIG.sub(fig, REF.sub(one, text))
 
     def _on_tag(self, tag, stack: list[tuple[str, bool]], divs: list) -> None:
         name, attrs = tag.name, tag.attrs
@@ -265,7 +379,7 @@ class _Link:
             elif not tag.self_closing:
                 divs.append(message_page(attrs))
             return
-        if name not in SKIP and name != "span":
+        if name not in SKIP and name not in ("span", "b"):
             return
         if tag.self_closing:
             return
@@ -276,7 +390,7 @@ class _Link:
                     break
             return
         cls = re.search(r"\bclass=\"([^\"]*)\"", attrs)
-        label = name == "span" and cls is not None and {"chip", "ai-label"} & set(cls.group(1).split())
+        label = name in ("span", "b") and cls is not None and {"chip", "ai-label", "fig-n"} & set(cls.group(1).split())
         stack.append((name, name in SKIP or bool(label)))
 
     def run(self) -> tuple[str, Counter, list[str]]:
@@ -311,6 +425,8 @@ def build(src: pathlib.Path, out: pathlib.Path) -> int:
     html = re.sub(r"\{\{AI:([^|}]+)\|([^|}]+)\|([^}]+)\}\}", lambda m: ai_label(*m.groups()), html)
     # After the labels and buttons are expanded, so a built page builds the same; before the images.
     html = number_need_items(html)
+    html, figures = number_figures(html, this_pass(html, src))
+    html, news = stamp_news(html, this_pass(html, src))
     html, made, unresolved = link_references(html, src)
 
     missing: list[str] = []
@@ -331,8 +447,12 @@ def build(src: pathlib.Path, out: pathlib.Path) -> int:
         raise SystemExit(f"build: refused, placeholders left: {sorted(set(left))}")
     out.write_text(html, encoding="utf-8")
     print(f"{out} {len(html) // 1024} KB, {html.count('data:image')} images inlined, "
-          f"{made['subject']} subject and {made['need item']} need-item references linked"
+          f"{figures} figures numbered, {made['subject']} subject, {made['need item']} need-item and "
+          f"{made['figure']} figure references linked"
           + (f" ({made['earlier page']} to an earlier pass's page)" if made["earlier page"] else ""))
+    if news:
+        print(f"  since the last pass: {news['subject']} new subject(s), {news['round']} new round(s), "
+              f"{news['unchanged']} unchanged; {news['asks']} subject(s) ask you a decision")
     if unresolved:
         print(f"  not linked (no such id in this page, or in the earlier page named): {sorted(set(unresolved))}")
     return 0

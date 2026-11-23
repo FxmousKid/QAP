@@ -17,6 +17,11 @@ The page comes with this behaviour built in; you never write it by hand:
   - The article reserves the pane's gutter whether it is open or not, so opening it shifts nothing.
   - On wide windows the pane and the top buttons hug the article; on narrow ones the pane slides over the page.
   - It highlights the section being read, and its state is remembered.
+  - **What moved since the last pass** (pass 2 on; `build.py` reads it from `data-pass`, nothing to write): a
+    NEW sign on the pane's line, left of the subject's number (filled: a subject opened in this pass; outlined: a
+    new round), the same sign after the number in the subject's heading, a violet pill with the letters of the
+    decisions a subject asks, and above the list "5 new · 4 wait for you · 9 unchanged" with an "Only what's new"
+    filter. A click in the pane jumps to the subject and flashes its heading.
 - **Speaker labels.** The user is **"Me"** (they read the page: "Me" is them, never you). The AI is its **logo +
   name + model in the vendor colour**: `{{AI:claude|Claude|Opus 5.5}}` (vendors: `claude`, `openai`, `gemini`,
   `other`). Each label also shows which pass the message comes from.
@@ -118,6 +123,8 @@ $Q place ~/somewhere/choices db-migration-v3/billing --create --title "Billing" 
 $Q mkdir / mv / rename / icon / rmdir  # organise (the dashboard does the same: drag a tile onto a folder)
 $Q project list | new | move | set | rm # projects above the families (`qap project move <family> <project>`)
 $Q serve --open                        # the dashboard: http://127.0.0.1:8750 (one origin: stars persist)
+$Q new-batch / split / board / status / decide / ledger / tell
+                                       # a batch: a triage pass, then one session per group (below)
 ```
 
 - One subject = one conversation thread (one qa-project), passes `QA-PASS-1`, `QA-PASS-2`, … in it. A
@@ -160,13 +167,27 @@ $Q serve --open                        # the dashboard: http://127.0.0.1:8750 (o
      When they answered a decision of this subject in the closing list, quote that answer here too.
    - Then your answer (`.msg.ai`): short sentences, numbers first, then the evidence.
    - A decision is a `.call.violet` box inside your answer: options with their consequence, and `Default: …`.
+     Each option says whether it **fixes the cause or hides the symptom**.
+   - **Every topic** carries, inside the answer:
+     - a **product explanation**: what the rep or the manager sees, in their words;
+     - a **tech explanation**: what the code does, with the exact line linked;
+     - a **tech diagram** whenever the topic touches two components or more: nodes are components, edges are
+       calls or data, the edge that breaks in red. When you propose a fix, the same diagram **after** the fix,
+       with the changed nodes marked (`scripts/diagram.py`, below);
+     - a **product path diagram** when reproducing the scenario takes more than three steps or depends on timing;
+     - every number with its source and the query that gives it, so it can be checked again. Don't trust a number
+       you did not check: mark it unverified.
+   - **Plan before code.** The plan is agreed before any code: restate it, and code starts on the user's go. The
+     smallest change is the default ("front only" and "no backend change" are valid answers); a new RPC or
+     table needs a reason in the plan. When the user picks another option than yours, write down why.
    - A ticket the user will create by hand: a `.ticket` card filled from their tracker's template (never create
      the ticket yourself; say where the template came from).
    - Optional material inside an answer (prefilled tickets, long tables) goes in a `details.more` fold, never in
      `details.earlier`, which is reserved for the thread's earlier messages.
 5. **"What I need from you".** Every decision numbered (an `<ol>`; the build gives each item `id="need-N"`),
-   with its default, plus one **answer line** (`ok` takes every default; otherwise for example
-   `A1 · B go · C wait`).
+   with its default, plus one **answer line** that names every decision with its default (`A1 · B go · C wait`):
+   the user changes the letters they disagree with. Never one blanket `ok` behind many defaults. Many decisions
+   stay in this pass, each under its subject: their number never makes a batch (below).
 6. A `.call.violet` **"What I will not do until you answer"**: no code, no prod write, no tickets, …
 7. **Footer.** "Stored at `<path>` (the real path `qap where` gives). This is the conversation log for
    pass N, not the spec. Open it in a browser (or `qap serve`)."
@@ -182,6 +203,50 @@ an `id`.
 - Keep the same subjects and ids. Settled subjects get an `ok` chip. New subjects go at the end, before the
   closing sections; renumber "What I need from you" to stay last (its id stays `need`).
 - Rewrite the header, lede, "where we are" and closing sections by hand.
+
+## Batches: only for work that splits into independent problems
+
+**The default is one subject and its pass, whatever the number of topics or decisions.** A batch is the
+exception. Each of its groups is one more Claude session, with its own thread the user must read and answer:
+three groups turn a one-hour pass into an afternoon.
+
+Make a batch only when the work splits into **independent problems**: each one in different code (another app,
+another service, the database), needing none of the others' decisions, and able to ship as its own PR in any
+order. The user's own examples:
+- an iOS upload retry bug, missing Android translations and a database backfill: three groups;
+- cross-meeting Serge (one backend for web and app, eight findings, five decisions): no group, one pass.
+
+Never a reason for a batch:
+- many topics or many decisions, a night run, a long review: one pass, with as many subjects as it needs;
+- one feature, one bug or one contract that touches several surfaces (database, web, iOS, Android): its
+  decisions bind every surface at once, so it is one thread, and one PR across the layers;
+- long work: it continues in the next passes of the same subject.
+
+**The test, before `qap new-batch`:** name the groups, then ask of every pair: could two people do these at the
+same time without talking to each other? A pair that has to talk is one group. Fewer than two groups left: no
+batch (`check.py` and `qap split` refuse a triage pass with fewer than two session groups). In doubt, no batch:
+the user can always ask for one. Say in one line of the pass's lede why it is one pass or a batch.
+
+A batch, once it is called for:
+
+- A **triage pass** sorts the topics into **groups**, two or three lines per topic. Its rules (the grouping test,
+  one owner per shared file, the fast lane and the info list, the order): `lanes/triage.md`. It is a pass like
+  any other, started from `template/TRIAGE.src.html` by `qap new-batch`; each group is an `h2.grp` heading with
+  `data-lane`, `data-group`, `data-owns` and `data-waits`, and its topics follow it. `check.py` fails a topic in
+  no group and a file two groups own. The contents pane nests the topics under their group.
+- `qap split <batch>` makes **one subject per session group**, with its `brief.md`, `status.json` and
+  `decisions.json`, and lists the groups to start now with their one-line first prompt.
+- Each **group session** works its own thread, in its own subject; it reads its brief and `lanes/group-session.md`.
+  Only that session writes in its folder, so nothing races.
+- **The ledger** is every `decisions.json` of the family, assembled when read (`qap ledger`); a rule is added
+  with `qap decide`, never rewritten. A behaviour a user could notice that is not in it is a decision box, not
+  code.
+- **The board** (`qap board <batch>`, the dashboard's `/ui/board.html#<batch>`, the qap mod's pane in the Claude
+  app) shows which group waits for the user, from the sessions' hooks; `qap status` adds what the session says
+  about itself (plan agreed, PR open). Served by `qap serve`, the triage pass shows each group's latest round
+  inside it.
+
+Read the lane file only when you are that session: an ordinary pass needs neither.
 
 ## Only what the reader can act on
 
@@ -266,6 +331,11 @@ A QA pass is read by someone deciding. A good chart decides faster than three pa
   `db-migration-v3/system-org/img/org-vs-system.py`, `db-migration-v3/signal/img/family-size.py`,
   `db-migration-v3/session/img/family-size.py` (in the content root).
 
+**Numbers.** The build numbers every figure "P.K" (pass P, its K-th figure): "Figure 2.3" opens its caption, a
+"Fig. 2.3" badge sits just above its image, and `#fig-2-3` deep-links to it. `qap carry` stamps the numbers into the
+source it carries from, so a figure keeps its number in every later pass. Write "figure 2.3" in the text and the
+build links it; the user can name a figure the same way in a reply. Never number figures by hand.
+
 **How to draw them**
 - Use `scripts/chart_style.py` (matplotlib) with `uv run --no-project --with matplotlib python chart.py`.
   Nothing needs installing.
@@ -278,6 +348,9 @@ A QA pass is read by someone deciding. A good chart decides faster than three pa
 - **Look at every PNG before you embed it** (open the image), and fix overlaps and unreadable labels. A
   chart that misleads is worse than none.
 - Keep the script that made each chart next to the PNG in `img/`, so the next pass can redraw it.
+- **Diagrams** (nodes and edges: the tech view before and after a fix, a product path) use
+  `scripts/diagram.py`, the twin of `chart_style.py`: list the nodes, where they sit and the edges; it writes the
+  SVG in the house style with plain `python3`. Its docstring has the three views. Keep the script in `img/` too.
 
 ## Writing rules
 

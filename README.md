@@ -32,6 +32,28 @@ qap serve --open               # the dashboard
 Agents add `--json`: no prompts, JSON out. `skill/` is the `qa-pass` agent skill that tells an agent how to write a
 pass and when to call `qap`.
 
+## Batches: one session per group
+
+When a batch of topics is too big for one thread, a **triage pass** sorts the topics into groups. `qap split` then
+makes one subject per group, and each group gets its own agent session and its own thread. Only that session writes
+in the group's folder, so nothing races.
+
+```bash
+qap new-batch payments/night-2 --title "Night 2"   # the batch, and its triage pass from the triage template
+qap build night-2/triage --check                   # fails a topic in no group, or a file two groups own
+qap split night-2                                  # a subject per group, with brief.md, and the first prompts
+qap board night-2                                  # who waits for you, who works, who waits for another group
+qap status night-2/retries --phase pr_open --pr <url>   # what a group's session reports about itself
+qap decide night-2/retries --rule "No new RPC" --who Sam       # the decisions ledger: added to, never rewritten
+```
+
+The **board** (`/ui/board.html#<batch>` under `qap serve`) and the triage pass show each group's state and its latest
+round. The states come from the sessions' own hooks, never from the agent. In the Claude app, the **`qap` mod**
+(`mods/qap`) sends them, adds a QA board pane beside the triage session and a group pane beside each group session,
+and opens a group's session in split view from the board. Load it in every session by adding the folder to
+`CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`. The rules the sessions follow are in
+`skill/lanes/`.
+
 ## Projects
 
 A **project** (work, personal…) holds **families** (the top-level folders: Payments, Platform…), which hold

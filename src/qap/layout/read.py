@@ -6,6 +6,7 @@ folder or a subject; a ref that starts with "@", or kind "project", finds a proj
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import passes as P
 from .paths import (
@@ -132,6 +133,48 @@ def resolve(root: Path, ref: str, kind: str | None = None) -> dict:
     if hits:
         raise LayoutError(f"{ref!r} matches several: {', '.join(h['path'] for h in hits)} — give the path")
     raise LayoutError(f"no {what} {ref!r} under {root} (see `qap list`)")
+
+
+def is_link(text: str) -> bool:
+    """A link or a file path, rather than a subject's name."""
+    text = (text or "").strip()
+    return "://" in text or text.startswith(("/", "~/", "#/"))
+
+
+def resolve_link(root: Path, link: str) -> tuple[dict, str | None]:
+    """The subject or folder a link points to, and the pass it names (a file name or a label), if any.
+
+    A link is what a browser shows: the dashboard (…/#/<path>?pass=3), a page it serves
+    (…/c/<path>/QA-PASS-3.html), its board (…/ui/board.html#<batch>), a file:// link, a path, or a
+    copy hosted elsewhere whose path ends with the subject's path (folders in front are dropped).
+    """
+    link = link.strip()
+    parts = urlsplit(link)
+    candidates: list[str] = []
+    label = None
+    if parts.scheme in ("", "file"):
+        path = Path(unquote(parts.path or link)).expanduser()
+        try:
+            candidates.append(path.resolve().relative_to(root.resolve()).as_posix())
+        except ValueError:
+            candidates.append(path.as_posix())
+    else:
+        fragment = unquote(parts.fragment).lstrip("/")
+        if fragment:
+            where, _, query = fragment.partition("?")
+            label = (parse_qs(query).get("pass") or [None])[0]
+            candidates.append(where)
+        path = unquote(parts.path)
+        candidates.append(path.removeprefix("/c/"))
+    nodes = {n["path"]: n for n in walk(tree(root, False)) if n["path"]}
+    for rel in candidates:
+        segments = [s for s in rel.split("/") if s]
+        page = segments.pop() if segments and P.parse_name(segments[-1]) else None
+        for start in range(len(segments)):
+            node = nodes.get("/".join(segments[start:]))
+            if node:
+                return node, page or label
+    raise LayoutError(f"no subject or folder of {root} matches {link!r}")
 
 
 def projects(root: Path) -> list[dict]:

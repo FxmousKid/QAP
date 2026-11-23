@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="qa-project" content="PROJECT">  <!-- stars are kept per project, so they carry over to the next passes -->
+<meta name="qa-pass" content="N">
+<meta name="qa-kind" content="triage">  <!-- a triage pass: check.py checks that every topic sits in a group -->
+<title>PROJECT — Q&amp;A pass N</title>
+{{QA_PASS_HEAD}}
+</head>
+<body>
+{{TOPBAR}}
+<aside class="side" aria-label="On this page">
+  <div class="side-h">On this page</div>
+  <ol id="toc-list"></ol>  <!-- the groups, each with its topics under it, and its live state under qap serve -->
+</aside>
+<main class="wrap">
+
+<header>
+  <div class="kicker">PROJECT · triage, not a spec</div>
+  <h1>Q&amp;A pass N — the batch in N groups, N fast fixes and N notes</h1>
+  <p class="sub">
+    Every topic of the batch, sorted into groups. Each session group gets its own session and its own thread;
+    the fast lane gets one PR per fix and no session; the info list needs nothing. Two or three lines per topic:
+    the depth goes into the groups.
+  </p>
+  <div class="meta">DD Mon YYYY · triage pass N · where the topics come from (a QA pass, a night run, tickets)</div>
+</header>
+
+<p class="lede">
+  The batch in one paragraph: how many topics, how many groups, which group is the most urgent and why.
+</p>
+
+<div class="mantras">
+  <div><b>Groups.</b> One line per session group: its goal, and what it waits for.</div>
+</div>
+
+<!-- ================= one heading per group =================
+     The grouping test: two topics share a group when they need the SAME DECISION, or when their fixes change the
+     SAME CONTRACT (what a function does, a policy, what a status means, an API schema). Reading the same thing
+     does not count, and neither does the layer or the platform ("iOS", "the backend").
+     A file or contract that two groups would edit gets ONE owner: the other group waits for its PR (data-waits).
+     A topic whose fix is clear, with no product question and files of its own, goes to the fast lane.
+     A topic with nothing to change goes to the info list.
+     Order the session groups by urgency (a cutover risk, a production bug first). Groups that wait for another
+     come after it.
+     data-lane: session | fast | info. data-group: the folder qap split creates (lower-case, digits, '-').
+     data-owns: ';'-separated. data-waits: ','-separated group names. p.goal: one sentence, the group's goal. -->
+<h2 id="g-first" class="grp" data-lane="session" data-group="first-group" data-owns="the file or contract it owns" data-waits="">The group's conclusion, as a sentence anyone can read</h2>
+<p class="goal">What is true once this group is done, in one sentence.</p>
+
+<h2 id="p1"><span class="n">01</span>The topic's conclusion, in plain words</h2>
+<span class="chip ask">what the group decides first</span>
+<div class="msg ai" id="p1-1a" data-pass="1"><div class="who">{{AI:claude|Claude|Opus 5.5}}</div>
+  <p>Two or three lines: what the rep or manager sees, where in the code it comes from (a link), and the
+    decision the group has to take. Why it is in this group: the decision or the contract it shares.</p>
+</div>
+
+<h2 id="g-fast" class="grp" data-lane="fast">Fast lane: one PR each, no session</h2>
+
+<h2 id="p2"><span class="n">02</span>A clear fix with files of its own</h2>
+<span class="chip ok">fast lane</span>
+<div class="msg ai" id="p2-1a" data-pass="1"><div class="who">{{AI:claude|Claude|Opus 5.5}}</div>
+  <p>The fix in one line, and the files it touches.</p>
+</div>
+
+<h2 id="g-info" class="grp" data-lane="info">Nothing to change</h2>
+
+<h2 id="p3"><span class="n">03</span>A topic that needs no change, and why</h2>
+<span class="chip exp">info</span>
+<div class="msg ai" id="p3-1a" data-pass="1"><div class="who">{{AI:claude|Claude|Opus 5.5}}</div>
+  <p>One line: what was checked, and why nothing changes.</p>
+</div>
+
+<!-- ================= closing ================= -->
+<h2 id="need"><span class="n">NN</span>What I need from you</h2>
+<ol>  <!-- the build gives each item id="need-N" -->
+  <li><strong>The groups.</strong> Are the groups right? Say which topic moves where, or <code>groups ok</code>.
+    Then I run <code>qap split</code> and start the first sessions.</li>
+</ol>
+<p>Answer line: <code>groups ok</code>, or a move per line (<code>02 → first-group</code>).</p>
+
+<div class="call violet">
+  <h4>What I will not do until you answer</h4>
+  <p>No split, no session, no code, no PR.</p>
+</div>
+
+<footer>
+  Stored at <code>path/to/QA-PASS-N.html</code>.
+  This is the conversation log for triage pass N, not the spec.
+  Open it with <code>qap serve</code> to see each group's latest round inside it.
+  <div class="env" id="env"></div>
+</footer>
+
+</main>
+{{QA_PASS_JS}}
+</body>
+</html>

@@ -81,14 +81,15 @@ def carry(prev: Path, nxt: Path, n: int, skip: str = "", stars: str = "", ai: st
     return {"from": str(prev), "src": str(nxt), "n": n, "ok": code == 0, "output": text}
 
 
-def seed_first(dest: Path, qa_project: str, n: int = 1) -> dict:
+def seed_first(dest: Path, qa_project: str, n: int = 1, template: str = "QA-PASS.src.html") -> dict:
     """Start a subject's first pass from the template, with its qa-project and number filled in.
+    template is a file of the skill's template/ folder: TRIAGE.src.html starts a batch's triage pass.
 
     The template has three slots for the project name: the qa-project meta, the <title>, and the kicker.
     A PROJECT left after those three is a slot this function does not know, so it stops rather than
     rewriting a word in the instructions. The name is escaped: it lands in an attribute and in text.
     """
-    template = config.skill_dir()[0] / "template" / "QA-PASS.src.html"
+    template = config.skill_dir()[0] / "template" / template
     text = template.read_text(encoding="utf-8")
     n = int(n)
     name = html.escape(qa_project, quote=True)

@@ -1,0 +1,6 @@
+{
+  "name": "qap",
+  "version": "0.2.0",
+  "description": "QAP batches in the Claude app: a board pane in the triage session, a group pane in each group session, and the hook events that tell qap serve which session waits for you",
+  "types": "./types/index.d.ts"
+}

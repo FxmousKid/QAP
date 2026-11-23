@@ -157,3 +157,68 @@ def element_end(text: str, start: int) -> int:
         elif not inner.self_closing:
             depth += 1
     raise ValueError(f"unbalanced <{tag.name}> at offset {start}")
+
+
+_MSG_ID_PASS = re.compile(r"-(\d+)[ua]$")
+
+
+def _figure_pass(attrs: str) -> int | None | bool:
+    """For a <div>'s attributes: the pass of a .msg (its data-pass, or the pass in its id), None for a .msg
+    with no pass, False for a div that is not a message."""
+    if "msg" not in classes(attrs):
+        return False
+    own = attr(attrs, "data-pass")
+    if own and own.isdigit():
+        return int(own)
+    found = _MSG_ID_PASS.search(attr(attrs, "id") or "")
+    return int(found.group(1)) if found else None
+
+
+def figure_labels(text: str, current: int | None) -> list[tuple[Tag, str]]:
+    """Every <figure> opening tag with its label "P.K", in page order. A figure that has data-fig keeps it.
+    Otherwise P is the pass of the innermost .msg holding it (the page's pass outside messages) and K its rank
+    among pass P's figures, skipping any K a data-fig already took. carry.py stamps the labels into the source
+    it carries from, so a figure keeps its number in every later pass, even when other figures are dropped."""
+    found: list[tuple[Tag, str | int]] = []
+    divs: list[int | None | bool] = []
+    taken: dict[int, set[int]] = {}
+    for kind, _start, _end, tag in scan(text):
+        if kind != "tag" or tag is None:
+            continue
+        if tag.name == "div":
+            if tag.closing:
+                if divs:
+                    divs.pop()
+            elif not tag.self_closing:
+                divs.append(_figure_pass(tag.attrs))
+        elif tag.name == "figure" and not tag.closing:
+            own = attr(tag.attrs, "data-fig")
+            if own:
+                p, _, k = own.partition(".")
+                if p.isdigit() and k.isdigit():
+                    taken.setdefault(int(p), set()).add(int(k))
+                found.append((tag, own))
+            else:
+                page = next((d for d in reversed(divs) if d is not False and d is not None), current)
+                found.append((tag, page or 0))
+    rank: dict[int, int] = {}
+    out: list[tuple[Tag, str]] = []
+    for tag, label in found:
+        if isinstance(label, str):
+            out.append((tag, label))
+            continue
+        k = rank.get(label, 0) + 1
+        while k in taken.get(label, set()):
+            k += 1
+        rank[label] = k
+        taken.setdefault(label, set()).add(k)
+        out.append((tag, f"{label}.{k}"))
+    return out
+
+
+def stamp_figures(text: str, current: int | None) -> str:
+    """The same text with data-fig="P.K" on every <figure> that has none (see figure_labels)."""
+    for tag, label in reversed(figure_labels(text, current)):
+        if attr(tag.attrs, "data-fig") is None:
+            text = text[:tag.end - 1] + f' data-fig="{label}"' + text[tag.end - 1:]
+    return text

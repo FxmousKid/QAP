@@ -27,6 +27,17 @@ qa-stars:<qa-project>, and browsers keep localStorage per origin. Served from he
   POST /api/share/run          {path}     run the saved command on a redacted copy.
                                A command in the body is ignored.
 
+  Batches and groups (qap.groups), what the Claude app mod and the board read and write:
+  GET  /api/batches                 every batch (a folder with batch.json)
+  GET  /api/board?path=<batch>      its groups by lane: needs you, working, waits, ready, done
+  GET  /api/group?path=<group>      one group: its state, last events, inbox and the rules that bind it
+  GET  /api/ledger?path=<any>       every rule of that family's decisions.json files
+  POST /api/events  {group, kind, text?, session_id?, app_id?}  a session event a hook saw
+  POST /api/status  {group, phase?, note?, pr?}                 what the session reports about itself
+  POST /api/decide  {subject, rule, why?, who?, where?, covers?} add a rule to the ledger
+  POST /api/tell    {from, to, text}                            a note for another group's session
+  These writes change no pass, so they send no content_changed event.
+
   Plugins (qap.plugins):
   GET  /api/plugins                       every plugin, on or off, with its settings and commands
   POST /api/plugins/<id>/enable|disable   turn it on or off (saved, and loaded or unloaded right away)
@@ -63,7 +74,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.responses import FileResponse, JSONResponse, Response
 
-from . import config, icons, layout as L, plugins as PL, share, snapshot
+from . import config, groups as G, icons, layout as L, plugins as PL, share, snapshot
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8750
@@ -281,6 +292,22 @@ def build_api(root: Path, plugins: PL.App) -> FastAPI:
         headers["Content-Disposition"] = share.content_disposition(name)
         return Response(data, media_type="text/html; charset=utf-8", headers=headers)
 
+    @read("/api/batches")
+    def api_batches(request: Request) -> JSONResponse:
+        return _json(200, {"ok": True, "batches": G.batches(request.app.state.root)})
+
+    def lookup(name: str, fn):
+        def handler(request: Request) -> JSONResponse:
+            try:
+                return _json(200, {"ok": True, **fn(request.app.state.root, request.query_params.get("path") or "")})
+            except (L.LayoutError, ValueError, OSError) as e:
+                return _json(400, {"ok": False, "error": str(e)})
+        handler.__name__ = f"api_{name}"
+        return handler
+
+    for name, fn in (("board", G.board), ("group", G.group), ("ledger", G.ledger)):
+        read(f"/api/{name}")(lookup(name, fn))
+
     @read("/api/plugins")
     def api_plugins(request: Request) -> JSONResponse:
         app = request.app.state.plugins
@@ -299,6 +326,12 @@ def build_api(root: Path, plugins: PL.App) -> FastAPI:
     def post_action(action: str, request: Request, body: JsonBody) -> JSONResponse:
         if action in SHARE_POST:
             return _share_post(request, action, body)
+        if action in GROUP_POST:
+            try:
+                with request.app.state.lock:
+                    return _json(200, {"ok": True, **GROUP_POST[action](request.app.state.root, body)})
+            except (L.LayoutError, ValueError, OSError) as e:
+                return _json(400, {"ok": False, "error": str(e)})
         handler = ACTIONS.get(action)
         if handler is None:
             return _json(404, {"ok": False, "error": f"no action {action!r}"})
@@ -450,6 +483,27 @@ def act_project(root: Path, body: dict) -> dict:
     return {"path": node["path"], "id": node["id"]}
 
 
+def act_events(root: Path, body: dict) -> dict:
+    return G.record(root, _text(body, "group"), _text(body, "kind"), _text(body, "text", False) or "",
+                    _text(body, "session_id", False) or "", _text(body, "app_id", False) or "",
+                    _text(body, "origin", False) or "")
+
+
+def act_status(root: Path, body: dict) -> dict:
+    return G.set_phase(root, _text(body, "group"), _text(body, "phase", False), _text(body, "note", False),
+                       _text(body, "pr", False))
+
+
+def act_decide(root: Path, body: dict) -> dict:
+    return {"decision": G.decide(root, _text(body, "subject"), _text(body, "rule"),
+                                 *(_text(body, k, False) or "" for k in ("why", "who", "where", "covers")))}
+
+
+def act_tell(root: Path, body: dict) -> dict:
+    return G.tell(root, _text(body, "from"), _text(body, "to"), _text(body, "text"))
+
+
+GROUP_POST = {"events": act_events, "status": act_status, "decide": act_decide, "tell": act_tell}
 ACTIONS = {"mkdir": act_mkdir, "mv": act_mv, "rename": act_rename, "icon": act_icon, "rmdir": act_rmdir,
            "project": act_project}
 SHARE_POST = {"share/command": act_share_command, "share/run": act_share_run}
@@ -490,6 +544,10 @@ class QapServer:
 
 def _listen(port: int) -> socket.socket:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # A restart takes the port back from the closing connections of the last run (TIME_WAIT); a second server
+    # still cannot listen on a port another one holds.
+    if os.name == "posix":
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind(("127.0.0.1", port))
         sock.listen(128)

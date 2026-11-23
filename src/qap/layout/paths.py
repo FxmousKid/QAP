@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from pathlib import Path
 
 from .. import passes as P
@@ -62,7 +63,7 @@ def read_json(path: Path) -> dict:
 
 
 def write_json(path: Path, data: dict) -> None:
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")  # one per writer: no clobbering
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, path)
 

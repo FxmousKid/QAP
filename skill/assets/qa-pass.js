@@ -1,11 +1,17 @@
-// QA pass page behaviour: theme toggle, the contents pane (fixed, never pushes the article) with scroll-spy,
+// QA pass page behaviour: theme toggle, the contents pane (fixed, never pushes the article) with scroll-spy and
+// what moved since the last pass (NEW signs, counts, "Only what's new"),
 // screen detection (pixel ratio, width tier, ultrawide), message labels (pass + star on every message) and
 // the "View ★s" dialog, a reference list of starred messages, the "back to where I clicked" button, and the
-// search over every pass when the page is served by `qap serve`.
+// search over every pass when the page is served by `qap serve`; in a triage pass, each group's latest round
+// shown inside the page (served), and a page opened with ?embed=1 drawn as that frame.
 // The theme, the pane state and the pixel ratio are first applied before paint by the inline boot snippet in
 // <head> (THEME_BOOT in build.py); this file keeps them up to date.
 (function () {
   var root = document.documentElement;
+  // ?embed=1: this page is a group's round shown inside its triage pass. No top bar, no contents pane, no
+  // footer; it tells the page around it its height, so the frame grows instead of scrolling.
+  var EMBEDDED = /(?:^|&)embed=1(?:&|$)/.test(location.search.slice(1)) && window.parent !== window;
+  if (EMBEDDED) root.classList.add("embedded");
   var STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.75 5.57 6.15.9-4.45 4.33 1.05 6.12L12 16.84l-5.5 2.89 1.05-6.12L3.1 9.27l6.15-.9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 
   function store(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
@@ -85,10 +91,33 @@
     }).map(function (n) { return n.textContent; }).join("").trim();
   }
 
+  // The number of a heading, without the NEW sign markNews draws inside it.
+  function numText(n) {
+    return n ? Array.prototype.filter.call(n.childNodes, function (c) {
+      return !(c.nodeType === 1 && c.classList.contains("sign"));
+    }).map(function (c) { return c.textContent; }).join("").trim() : "";
+  }
+
+  // A heading picked in the pane flashes once the (smooth) jump has landed on it, so the reader sees which one.
+  // Landed: the heading has not moved for 8 frames (scrollend does not fire for an anchor jump everywhere).
+  function flashWhenLanded(el) {
+    var last = null, still = 0, start = Date.now();
+    (function check() {
+      var top = Math.round(el.getBoundingClientRect().top);
+      still = top === last ? still + 1 : 0;
+      last = top;
+      if (still < 8 && Date.now() - start < 4000) { requestAnimationFrame(check); return; }
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+    })();
+  }
+
   function buildToc() {
     var list = document.getElementById("toc-list");
     if (!list) return [];
     var links = [];
+    var group = null;  // the list of the group heading above, while topics follow it
     document.querySelectorAll("main h2[id]").forEach(function (h2) {
       var a = document.createElement("a");
       a.href = "#" + h2.id;
@@ -96,7 +125,7 @@
       if (num) {
         var tn = document.createElement("span");
         tn.className = "tn";
-        tn.textContent = num.textContent;
+        tn.textContent = numText(num);
         a.appendChild(tn);
       }
       a.appendChild(document.createTextNode(h2Title(h2)));
@@ -107,10 +136,26 @@
         a.appendChild(document.createElement("br"));
         chips.forEach(function (c) { a.appendChild(c.cloneNode(true)); });
       }
-      a.addEventListener("click", function () { if (narrow()) setToc(false, false); });
+      a.addEventListener("click", function () {
+        if (narrow()) setToc(false, false);
+        flashWhenLanded(h2);
+      });
       var li = document.createElement("li");
       li.appendChild(a);
-      list.appendChild(li);
+      // A group heading (h2.grp) holds the topics after it, indented under it, until the next group or a
+      // closing section (What I need from you).
+      if (h2.classList.contains("grp")) {
+        li.className = "grp";
+        li.setAttribute("data-group", h2.getAttribute("data-group") || "");
+        group = document.createElement("ol");
+        li.appendChild(group);
+        list.appendChild(li);
+      } else if (group && /^p\d+$/.test(h2.id)) {
+        group.appendChild(li);
+      } else {
+        group = null;
+        list.appendChild(li);
+      }
       links.push({ a: a, target: h2 });
     });
     return links;
@@ -126,6 +171,70 @@
     }
     window.addEventListener("scroll", update, { passive: true });
     update();
+  }
+
+  // ---- what moved since the last pass ----
+  // build.py stamps each subject h2: data-new="subject|round" (it moved in this pass), data-since="P" (its latest
+  // pass), data-asks="S R" (the decisions it asks); h2#need gets data-items. Drawn here: a NEW sign on the
+  // pane's line left of the number (filled: a new subject; outlined: a new round) and after the number in the
+  // heading, a violet pill for what waits for you, and the counts with "Only what's new" above the list.
+  var SPARK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 .8l1.3 3.9 3.9 1.3-3.9 1.3L6 11.2 4.7 7.3.8 6l3.9-1.3z" fill="currentColor"/></svg>';
+
+  function newSign(h2, inHeading) {
+    var kind = h2.getAttribute("data-new");
+    var sign = document.createElement("span");
+    sign.className = "sign " + kind;
+    sign.title = (kind === "subject" ? "New subject in pass " : "New round in pass ") + h2.getAttribute("data-since");
+    sign.innerHTML = (inHeading ? SPARK : "") + "NEW";
+    return sign;
+  }
+
+  function markNews(links) {
+    var list = document.getElementById("toc-list");
+    if (!list || !document.querySelector("main h2[data-new]")) return;
+    var moved = 0, same = 0, waits = 0;
+    links.forEach(function (l) {
+      var h2 = l.target, li = l.a.parentNode;
+      if (h2.hasAttribute("data-new")) {
+        moved++;
+        li.classList.add("moved");
+        li.insertBefore(newSign(h2, false), l.a);
+        var n = h2.querySelector(".n");
+        if (n && !n.querySelector(".sign")) n.appendChild(newSign(h2, true));
+      } else if (h2.hasAttribute("data-since")) {
+        same++;
+        li.classList.add("same");
+        l.a.title = "Unchanged since pass " + h2.getAttribute("data-since");
+      }
+      var asks = h2.getAttribute("data-asks") || h2.getAttribute("data-items");
+      if (!asks || asks === "0") return;
+      var pill = document.createElement("span");
+      pill.className = "asks";
+      pill.textContent = asks;
+      pill.title = h2.id === "need" ? asks + " waiting for your answer" : "Waits for your answer: " + asks;
+      l.a.insertBefore(pill, l.a.firstChild);
+      if (h2.id === "need") waits = parseInt(asks, 10) || 0;
+    });
+    var box = document.createElement("div");
+    box.className = "news";
+    var counts = document.createElement("div");
+    counts.className = "news-n";
+    counts.innerHTML = '<span><b class="g">' + moved + "</b> new</span>" +
+      (waits ? ' · <span><b class="v">' + waits + "</b> " + (waits === 1 ? "waits" : "wait") + " for you</span>" : "") +
+      (same ? " · <span>" + same + " unchanged</span>" : "");
+    var label = document.createElement("label");
+    var only = document.createElement("input");
+    only.type = "checkbox";
+    only.checked = load("qa-only-new") === "1";
+    label.appendChild(only);
+    label.appendChild(document.createTextNode("Only what's new"));
+    var apply = function () { list.classList.toggle("only-new", only.checked); };
+    only.addEventListener("change", function () { apply(); store("qa-only-new", only.checked ? "1" : "0"); });
+    apply();
+    box.appendChild(counts);
+    box.appendChild(label);
+    list.parentNode.insertBefore(box, list);
+    list.classList.add("has-news");
   }
 
   // ---- messages: pass label + star on every .msg ----
@@ -193,7 +302,7 @@
     document.querySelectorAll("main h2[id], main .msg").forEach(function (el) {
       if (el.tagName === "H2") {
         var n = el.querySelector(".n");
-        subject = { num: n ? n.textContent.trim() : "", title: h2Title(el), id: el.id };
+        subject = { num: numText(n), title: h2Title(el), id: el.id };
         return;
       }
       if (!el.id) return;
@@ -491,6 +600,149 @@
       document.body.insertBefore(b, theme || document.body.firstChild);
       placeTop();
     }, function () {});
+  }
+
+  // ---- embedded: report the height to the triage pass around this page ----
+  function setupEmbedded() {
+    if (!EMBEDDED) return;
+    var last = 0;
+    var report = function () {
+      var h = Math.ceil(document.documentElement.scrollHeight);
+      if (h === last) return;
+      last = h;
+      try { window.parent.postMessage({ qap: "height", height: h }, location.origin); } catch (e) {}
+    };
+    if (window.ResizeObserver) new ResizeObserver(report).observe(document.body);
+    window.addEventListener("load", report);
+    document.addEventListener("toggle", report, true);
+    report();
+    // A link to another page opens it in the whole window, not inside the frame.
+    document.querySelectorAll("a[href]").forEach(function (a) {
+      if (a.getAttribute("href").charAt(0) !== "#" && !a.target) a.target = "_top";
+    });
+  }
+
+  // ---- a triage pass shows each session group's latest round inside it ----
+  // Served by qap serve, each group heading gets a frame at the end of its topics: the group's latest page,
+  // with ?embed=1, and its state from GET /api/board (re-read every few seconds; a new round reloads the frame).
+  // Opened as a file, the frame is a link to the group's folder instead (browsers isolate file:// frames).
+  var LANES = {
+    needs_you: ["live-you", function (g) {
+      return (g.session.state === "permission" ? "Asks for a permission" : "Waits for you") + since(g.session.since);
+    }],
+    working: ["live-work", function () { return "Working"; }],
+    waits: ["live-wait", function (g) { return "Waits for " + (g.blocked_by.join(", ") || "another group"); }],
+    stopped: ["live-wait", function () { return "Session ended"; }],
+    ready: ["live-wait", function () { return "Not started"; }],
+    done: ["live-done", function (g) { return g.phase === "merged" ? "Merged" : "Done"; }]
+  };
+
+  function since(iso) {
+    var ms = Date.now() - Date.parse(iso || "");
+    if (!(ms >= 0)) return "";
+    var min = Math.round(ms / 60000);
+    return min < 1 ? " · just now" : min < 60 ? " · " + min + " min" : " · " + Math.round(min / 60) + " h";
+  }
+
+  function setupGroups() {
+    if (meta("qa-kind") !== "triage" || EMBEDDED) return;
+    var heads = Array.prototype.slice.call(document.querySelectorAll('main h2.grp[data-lane="session"][data-group]'));
+    if (!heads.length) return;
+    var served = /^https?:$/.test(location.protocol) && !!window.fetch && location.pathname.indexOf("/c/") === 0;
+    var parts = decodeURIComponent(location.pathname.slice(3)).split("/");
+    var batch = parts.slice(0, -2).join("/");  // /c/<batch>/triage/QA-PASS-N.html
+    var frames = {};
+    heads.forEach(function (h2) {
+      var name = h2.getAttribute("data-group");
+      var box = document.createElement("section");
+      box.className = "gframe";
+      box.setAttribute("aria-label", "Group " + name + ": its latest round");
+      var head = document.createElement("div");
+      head.className = "gf-head";
+      var chip = document.createElement("span");
+      chip.className = "chip live-wait";
+      chip.textContent = served ? "…" : "Opened as a file";
+      var label = document.createElement("span");
+      label.className = "gf-label";
+      label.textContent = served ? "Group " + name : "Open this page with qap serve to see the group's latest round here.";
+      var open = document.createElement("a");
+      open.className = "gf-open";
+      open.textContent = "Open the group's thread";
+      open.href = served ? "/#/" + batch + "/" + name : "../" + name + "/";
+      // A round is long: the frame shows its first screenful until the reader asks for the whole round.
+      var more = document.createElement("button");
+      more.type = "button";
+      more.className = "gf-more";
+      more.textContent = "Show the whole round";
+      more.hidden = true;
+      more.addEventListener("click", function () {
+        var folded = box.classList.toggle("folded");
+        more.textContent = folded ? "Show the whole round" : "Fold it back";
+      });
+      box.classList.add("folded");
+      head.appendChild(chip); head.appendChild(label); head.appendChild(more); head.appendChild(open);
+      box.appendChild(head);
+      var body = document.createElement("div");
+      body.className = "gf-empty";
+      body.textContent = served ? "No round yet: the group's session writes its first one." : "";
+      if (served) box.appendChild(body);
+      // The frame goes after the group's last topic: before the next group heading or closing section.
+      var next = h2.nextElementSibling;
+      while (next && !(next.tagName === "H2" && (next.classList.contains("grp") || !/^p\d+$/.test(next.id)))) next = next.nextElementSibling;
+      h2.parentNode.insertBefore(box, next);
+      frames[name] = { box: box, chip: chip, label: label, open: open, more: more, body: body, frame: null, src: "" };
+    });
+    if (!served) return;
+
+    window.addEventListener("message", function (e) {
+      if (e.origin !== location.origin || !e.data || e.data.qap !== "height") return;
+      Object.keys(frames).forEach(function (name) {
+        var f = frames[name];
+        if (!f.frame || f.frame.contentWindow !== e.source) return;
+        f.frame.style.height = Math.max(120, e.data.height) + "px";
+        f.more.hidden = e.data.height <= f.box.clientWidth * 0.9;
+      });
+    });
+
+    var board = document.createElement("a");
+    board.className = "gboard";
+    board.href = "/ui/board.html#" + encodeURIComponent(batch);
+    board.textContent = "The live board of this batch";
+    var where = document.querySelector("main header .meta") || document.querySelector("main header");
+    if (where) where.parentNode.insertBefore(board, where.nextSibling);
+
+    var refresh = function () {
+      fetch("/api/board?path=" + encodeURIComponent(batch), { cache: "no-store" }).then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.ok) return;
+          data.groups.forEach(function (g) {
+            var f = frames[g.name];
+            if (!f) return;
+            var lane = LANES[g.lane] || LANES.ready;
+            f.chip.className = "chip " + lane[0];
+            f.chip.textContent = lane[1](g);
+            f.label.textContent = g.round ? "Round " + g.round + (g.note ? " · " + g.note : "") : "Group " + g.name;
+            if (g.page) f.open.href = g.page;
+            var tocItem = document.querySelector('aside.side li.grp[data-group="' + g.name + '"] > a');
+            if (tocItem) {
+              var live = tocItem.querySelector(".chip.live") || tocItem.appendChild(document.createElement("span"));
+              live.className = "chip live " + lane[0];
+              live.textContent = f.chip.textContent;
+            }
+            var src = g.page ? g.page + "?embed=1&v=" + encodeURIComponent(g.page_mtime) : "";
+            if (!src || src === f.src) return;
+            f.src = src;
+            if (!f.frame) {
+              f.frame = document.createElement("iframe");
+              f.frame.title = "Group " + g.name + ", round " + g.round;
+              f.box.replaceChild(f.frame, f.body);
+            }
+            f.frame.src = src;
+          });
+        }, function () {});
+    };
+    refresh();
+    setInterval(function () { if (!document.hidden) refresh(); }, 8000);
   }
 
   // ---- the "View ★s" dialog: a reference list, never the full messages ----
@@ -805,11 +1057,15 @@
     });
 
     setupSearch();
-    spy(buildToc());
+    var tocLinks = buildToc();
+    spy(tocLinks);
+    setupEmbedded();
+    setupGroups();
     countFolds();
     indexMessages();
     applySeed();
     paintStars();
+    markNews(tocLinks);
 
     var dlg = buildDialog();
     var starsButton = document.getElementById("stars-open");

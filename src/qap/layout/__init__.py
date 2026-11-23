@@ -39,13 +39,17 @@ from .paths import (
 from .project import (
     assign_project, make_project, project_id, project_node, read_projects, remove_project, set_project_meta,
 )
-from .read import find_project, folder_node, folders, projects, resolve, subject_node, subjects, tree, walk
+from .read import (
+    find_project, folder_node, folders, is_link, projects, resolve, resolve_link, subject_node, subjects, tree,
+    walk,
+)
 from .write import make_folder, make_subject, move, place, relink_sources, remove_folder, set_meta
 
 __all__ = [
     "FOLDER_FILE", "PROJECTS_FILE", "PROJECT_ID", "RESERVED", "SEGMENT", "SUBJECT_FILE", "LayoutError",
-    "abs_path", "assign_project", "clean_rel", "find_project", "folder_node", "folders", "is_subject_dir",
+    "abs_path", "assign_project", "clean_rel", "find_project", "folder_node", "folders", "is_link", "is_subject_dir",
     "make_folder", "make_project", "make_subject", "move", "place", "pretty", "project_id", "project_node",
     "projects", "read_json", "read_projects", "rel_path", "relink_sources", "remove_folder", "remove_project",
-    "resolve", "set_meta", "set_project_meta", "slug", "subject_node", "subjects", "tree", "walk", "write_json",
+    "resolve", "resolve_link", "set_meta", "set_project_meta", "slug", "subject_node", "subjects", "tree", "walk",
+    "write_json",
 ]

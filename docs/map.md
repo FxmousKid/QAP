@@ -35,6 +35,8 @@ uv run --project . python -m unittest discover -s tests
 | A content root inside another git repository is refused. | `src/qap/core_plugins/git-storage/store.py` | `tests.test_git_storage.GitStorage.test_a_content_root_inside_another_repository` |
 | need item N in an earlier pass's message links to that pass's page. | `skill/scripts/build.py` | `tests.test_build.NeedItemsOfEarlierPasses.test_an_earlier_ai_message_links_to_its_own_pass` |
 | need item N outside a message links to this page's list. | `skill/scripts/build.py` | `tests.test_build.NeedItemsOfEarlierPasses.test_this_pass_and_text_outside_messages_keep_the_local_list` |
+| Each subject h2 of pass 2 on is stamped new subject, new round or unchanged since pass P, with the decisions it asks; the built page only, never the source, and pass 1 gets nothing. | `skill/scripts/build.py` | `tests.test_news.WhatMoved.test_new_subject_new_round_and_unchanged_since` |
+| A built page builds the same: the marks of what moved are replaced, not added twice. | `skill/scripts/build.py` | `tests.test_news.WhatMoved.test_only_the_marks_change_and_a_built_page_builds_the_same` |
 | A comment, a pre, a code span, and the text of a quoted attribute are copied unchanged when references are linked. | `skill/scripts/html_span.py` | `tests.test_build.NeedItemsOfEarlierPasses.test_a_comment_a_pre_and_a_quoted_gt_are_not_linked` |
 | carry moves each open message into details.earlier byte for byte and writes the new round's TODO placeholders. | `skill/scripts/carry.py` | `tests.test_pages.Carry.test_open_messages_move_byte_for_byte_into_the_fold` |
 | A closing tag written inside a comment or a quoted attribute does not end the message carry is moving. | `skill/scripts/html_span.py` | `tests.test_pages.Carry.test_a_comment_and_a_quoted_gt_do_not_end_a_message` |
@@ -45,6 +47,13 @@ uv run --project . python -m unittest discover -s tests
 | The second search returns the cached index and does not open the pages again. | `src/qap/snapshot.py` | `tests.test_snapshot.Snapshot.test_the_second_read_does_not_open_the_pages_again` |
 | Editing a pass file changes the cached tree. | `src/qap/snapshot.py` | `tests.test_snapshot.Snapshot.test_editing_a_pass_invalidates_the_cache` |
 | The next GET /api/tree after a pass file changes shows the new title. | `src/qap/server.py` | `tests.test_cli_server.Server.test_a_changed_pass_shows_up_on_the_next_read` |
+| A triage pass fails check when a topic is in no group, or when two groups own the same file. | `skill/scripts/triage.py` | `tests.test_groups.Triage.test_check_fails_a_triage_pass_with_a_topic_in_no_group_or_a_file_with_two_owners` |
+| A triage pass with fewer than two session groups is not a batch: check fails it and qap split refuses it. | `skill/scripts/triage.py` | `tests.test_groups.Triage.test_a_triage_pass_with_fewer_than_two_session_groups_is_one_ordinary_pass` |
+| qap split makes one subject per session group. A second split keeps each group's brief, status and decisions. | `src/qap/groups.py` | `tests.test_groups.Batch.test_split_makes_one_subject_per_session_group_and_keeps_what_a_session_wrote` |
+| The board's "needs you" comes from the sessions' hook events, not from the agent. A group that waits for another is not offered until that one merges. | `src/qap/groups.py` | `tests.test_groups.Batch.test_the_board_puts_needs_you_first_and_a_hook_event_moves_a_group` |
+| A decision is only added to a decisions.json, never rewritten. The ledger is every decision of the family. | `src/qap/groups.py` | `tests.test_groups.Batch.test_the_ledger_is_every_decision_of_the_family_and_an_entry_is_never_rewritten` |
+| qap where takes a link to a pass: the dashboard's, a page it serves, a file, or a copy hosted elsewhere whose path ends with the subject's. It answers the subject, that pass, and the batch's groups (proposed until the split). | `src/qap/layout/read.py` `src/qap/groups.py` | `tests.test_groups.Commands.test_a_link_to_a_pass_finds_its_subject_its_pass_and_its_batch` |
+| A hook event posted without an Origin header (the qap mod) is accepted and moves the group on the board. | `src/qap/server.py` | `tests.test_groups.Routes.test_a_hook_event_posted_without_an_origin_moves_the_group_on_the_board` |
 | Every test named in this file is a real test. | `tests/test_map.py` | `tests.test_map.Map.test_every_named_test_exists` |
 | Every file named under After a change exists. | `docs/map.md` | `tests.test_map.Map.test_every_named_file_exists` |
 
@@ -60,6 +69,8 @@ Run the command for the files you edited. Prefix it with `uv run --project .` so
 | `src/qap/server.py` `src/qap/cli.py` `src/qap/snapshot.py` | `python -m unittest tests.test_cli_server tests.test_snapshot` |
 | `src/qap/share.py` | `python -m unittest tests.test_share` |
 | `src/qap/core_plugins/git-storage/` | `python -m unittest tests.test_git_storage` |
-| `skill/scripts/build.py` | `python -m unittest tests.test_build` |
+| `skill/scripts/build.py` | `python -m unittest tests.test_build tests.test_news` |
 | `skill/scripts/carry.py` `skill/scripts/check.py` `skill/scripts/html_span.py` `src/qap/skill.py` | `python -m unittest tests.test_pages` |
+| `src/qap/groups.py` `skill/scripts/triage.py` | `python -m unittest tests.test_groups` |
+| `mods/qap/` (the Claude app mod) | `claude plugin test mods/qap` (not under uv) |
 | `docs/map.md` | `python -m unittest tests.test_map` |

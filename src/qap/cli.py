@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import config, icons, layout as L, passes as P, plugin_cli, plugins, prompt, skill
+from . import config, groups as G, icons, layout as L, passes as P, plugin_cli, plugins, prompt, skill
 
 EPILOG = """examples:
   qap list                                  the tree of folders, subjects and passes
@@ -27,6 +27,10 @@ EPILOG = """examples:
   qap project move side-projects personal   put a top-level folder (a family) in a project
   qap place ~/old/choices brain/prd16       move a folder of passes in; leaves a symlink behind
   qap serve --open                          the dashboard on http://127.0.0.1:8750
+  qap new-batch work/v3/night-2 --title "Night 2"   a batch: its triage subject, pass 1 from the triage template
+  qap split night-2                         one subject per group of the triage pass, with brief.md and status.json
+  qap board night-2                         the groups: needs you, working, waits for another group, ready, done
+  qap status night-2/reanalysis --phase plan_agreed   what a group session reports about itself
   qap config share_command 'share --qa-pass "$PASS_PATH" --family "$FAMILY" --subject "$SUBJECT" --pass "$PASS"'
   qap plugins                               plugins: core (git-storage) and community ones
   qap storage git init --remote <url>       back the content up in a git remote (git-storage plugin)
@@ -198,9 +202,23 @@ def _where(root: Path, node: dict) -> dict:
 
 
 def cmd_where(args) -> None:
+    """A subject from its name, or from a link to one of its passes. With a link the answer adds that pass, and
+    every answer adds the batch the subject is part of (its groups, split or proposed), if any."""
     root = root_of(args)
-    node = pick_subject(args, args.subject)
+    page = None
+    if args.subject and L.is_link(args.subject):
+        node, page = L.resolve_link(root, args.subject)
+        if node["kind"] == "folder":  # a batch's folder stands for its triage subject
+            node = L.resolve(root, G.team(root, node["path"])["triage"], "subject")
+    else:
+        node = pick_subject(args, args.subject)
     data = _where(root, node)
+    picked = next((p for p in node["passes"] if page in (p["file"], p["label"])), None) if page else None
+    data["pass"] = {**picked, "path": data["dir"] + "/" + picked["file"]} if picked else None
+    try:
+        data["batch"] = G.team(root, node["path"])
+    except L.LayoutError:
+        data["batch"] = None
     nxt = data["next"]
     emit(args, data, "\n".join([
         f"{node['title']}  ({node['path']})",
@@ -495,6 +513,90 @@ def cmd_serve(args) -> None:
     server.serve(root_of(args), args.port, args.open, as_json=args.json, app=app)
 
 
+# ---------------------------------------------------------------------------- batches and groups
+
+def cmd_new_batch(args) -> None:
+    root = root_of(args)
+    if not args.path:
+        raise Fail("give the batch's path, for example work/v3/night-2")
+    out = G.make_batch(root, args.path, title=args.title, icon=icons.validate(args.icon), project=args.project)
+    emit(args, out, f"created batch {out['batch']}\n  triage pass 1: {out['src']}\n"
+                    f"  next: write it, `qap build {out['triage']} --check`, then `qap split {out['batch']}`")
+
+
+def cmd_split(args) -> None:
+    root = root_of(args)
+    out = G.split(root, args.batch, force=args.force)
+    lines = [f"{g['group']}  {'created' if g['created'] else 'kept'}"
+             + ("" if g["wrote_brief"] else " (brief kept)") + (f"  waits for {', '.join(g['waits'])}" if g["waits"] else "")
+             for g in out["groups"]]
+    lines += ["", "start now:" if out["start_now"] else "nothing to start now"]
+    lines += [f"  {path}\n    {out['first_prompts'][path]}" for path in out["start_now"]]
+    emit(args, out, "\n".join(lines))
+
+
+def cmd_status(args) -> None:
+    root = root_of(args)
+    if args.phase is None and args.note is None and args.pr is None:
+        out = G.status(root, args.group)
+    else:
+        out = G.set_phase(root, args.group, args.phase, args.note, args.pr)
+    session = out.get("session") or {}
+    emit(args, out, f"{out['group']}: {out.get('phase') or '—'}"
+                    + (f" · session {session['state']}" if session.get("state") else "")
+                    + (f" · {out['note']}" if out.get("note") else "") + (f" · {out['pr']}" if out.get("pr") else ""))
+
+
+def cmd_event(args) -> None:
+    root = root_of(args)
+    out = G.record(root, args.group, args.kind, args.text or "", args.session_id or "", args.app_id or "")
+    emit(args, out, f"{out['group']}: {args.kind}")
+
+
+def cmd_board(args) -> None:
+    root = root_of(args)
+    if not args.batch:
+        found = G.batches(root)
+        emit(args, {"batches": found}, "\n".join(f"{b['path']}  {b['title']}  · {b['groups']} groups" for b in found)
+             or "no batch yet: `qap new-batch <family>/<batch>`")
+        return
+    view = G.board(root, args.batch)
+    titles = {"needs_you": "Needs you", "working": "Working", "waits": "Waits for another group",
+              "stopped": "Stopped", "ready": "Ready to start", "done": "Done"}
+    by_name = {g["name"]: g for g in view["groups"]}
+    lines = [f"{view['title']}  ({view['batch']})"]
+    for lane, names in view["lanes"].items():
+        if not names:
+            continue
+        lines.append(f"  {titles[lane]} · {len(names)}")
+        for name in names:
+            g = by_name[name]
+            extra = g["session"].get("question") if lane == "needs_you" else ", ".join(g["blocked_by"])
+            lines.append(f"    {name:<20} {g['phase']:<13} {(extra or '')[:90]}")
+    if view["start_next"]:
+        lines.append("  start next: " + ", ".join(g["name"] for g in view["start_next"]))
+    emit(args, view, "\n".join(lines))
+
+
+def cmd_decide(args) -> None:
+    root = root_of(args)
+    out = G.decide(root, args.subject, args.rule, args.why or "", args.who or "", args.where or "", args.covers or "")
+    emit(args, {"decision": out}, f"{out['id']}: {out['rule']}")
+
+
+def cmd_ledger(args) -> None:
+    root = root_of(args)
+    out = G.ledger(root, args.path)
+    emit(args, out, "\n".join(f"{d['id']:<18} {d['rule']}  ({d.get('who') or '?'}, {d.get('date', '')})"
+                               for d in out["decisions"]) or f"no decision in {out['family'] or 'the content root'} yet")
+
+
+def cmd_tell(args) -> None:
+    root = root_of(args)
+    out = G.tell(root, args.sender, args.to, args.text)
+    emit(args, out, f"note {out['id']} for {out['to']}")
+
+
 # ---------------------------------------------------------------------------- parser
 
 def parser(app: plugins.App | None = None) -> argparse.ArgumentParser:
@@ -597,6 +699,52 @@ def parser(app: plugins.App | None = None) -> argparse.ArgumentParser:
         if name == "build":
             p.add_argument("--check", action="store_true", help="run check.py after the build")
 
+    p = add("new-batch", cmd_new_batch, "a batch: a folder with batch.json and its triage subject (pass 1 from the "
+                                         "triage template)")
+    p.add_argument("path", nargs="?")
+    p.add_argument("--title")
+    p.add_argument("--icon")
+    p.add_argument("--project", help="the project (work, personal…) a new top-level folder joins")
+
+    p = add("split", cmd_split, "one subject per session group of the batch's triage pass, with brief.md, "
+                                "status.json and decisions.json")
+    p.add_argument("batch", help="the batch, or its triage subject")
+    p.add_argument("--force", action="store_true", help="rewrite the briefs of groups that already exist")
+
+    p = add("status", cmd_status, "a group's phase as its session reports it (show it, or set it)")
+    p.add_argument("group", help="<batch>/<group>, or a unique group name")
+    p.add_argument("--phase", choices=G.PHASES)
+    p.add_argument("--note")
+    p.add_argument("--pr", help="the group's PR link")
+
+    p = add("event", cmd_event, "record a session event (what a hook saw): started, waiting, answered, permission, "
+                                "ended, spawned")
+    p.add_argument("group")
+    p.add_argument("kind", choices=tuple(G.EVENTS))
+    p.add_argument("--text", help="waiting: the turn's last words (the question the board shows)")
+    p.add_argument("--session-id", dest="session_id")
+    p.add_argument("--app-id", dest="app_id", help="the Claude app's session id (local_…), for Jump to session")
+
+    p = add("board", cmd_board, "a batch's groups by lane: needs you, working, waits, ready, done (no batch: "
+                                "the batches)")
+    p.add_argument("batch", nargs="?")
+
+    p = add("decide", cmd_decide, "add a rule to a subject's decisions.json (the ledger: added to, never rewritten)")
+    p.add_argument("subject")
+    p.add_argument("--rule", required=True, help="the rule, in one line")
+    p.add_argument("--why")
+    p.add_argument("--who", help="who decided: the user, a teammate…")
+    p.add_argument("--where", help="a pass link, a Slack permalink, a Granola link")
+    p.add_argument("--covers", help="what it covers: tables, screens")
+
+    p = add("ledger", cmd_ledger, "every rule of a family's decisions.json files, oldest first")
+    p.add_argument("path", help="a family, or any folder or subject in it")
+
+    p = add("tell", cmd_tell, "a note from one group to another; the receiving session's mod shows it")
+    p.add_argument("sender", help="the group sending it")
+    p.add_argument("to", help="the group it is for (its name in the same batch, or its path)")
+    p.add_argument("text")
+
     p = add("serve", cmd_serve, "serve the dashboard and the content on 127.0.0.1")
     p.add_argument("--port", type=int, default=None, help="default 8750 (the next free one if taken)")
     p.add_argument("--open", action="store_true", help="open the dashboard in the browser")
@@ -607,7 +755,8 @@ def parser(app: plugins.App | None = None) -> argparse.ArgumentParser:
 
 # Commands that change the content: plugins hear "content_changed" after each of them (mkdir, new-subject with
 # --project and mv to @project included). `project` changes it unless it only lists.
-CHANGES = {"new-subject", "mkdir", "mv", "rmdir", "rename", "icon", "place", "carry", "project"}
+CHANGES = {"new-subject", "mkdir", "mv", "rmdir", "rename", "icon", "place", "carry", "project", "new-batch",
+           "split", "decide"}
 
 
 def changed_content(args) -> dict | None:
