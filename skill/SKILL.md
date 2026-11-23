@@ -37,12 +37,17 @@ The page comes with this behaviour built in; you never write it by hand:
 - **Deep links.** `QA-PASS-N.html#p3-1a` opens the fold that holds message `p3-1a` and flashes it. A link in
   the text to any `#id` (a subject, a need item, a decision box, a folded message) does the same, and the
   browser's Back returns to the sentence the reader clicked.
-- **Back to where I clicked.** After a jump through a link in the text (or a row of View ★s), a faint
-  "↩ Back to subject NN" (or "↩ Back to What I need from you") button shows in the top row, right of
-  ☰ Contents, so it never covers the header or the line a jump lands on; on a phone it keeps only its arrow
-  (the label stays in its tooltip). It returns to the link, reopening its folds, and flashes it. Jumps stack
-  ("+2"); it fades 20 s after the last jump (hovering keeps it) and hides once nothing is left to return to.
-  The browser's Back does the same thing; the key is `b`.
+- **Back to where I clicked.** After a jump through a link in the text (or a row of View ★s), a small
+  "↩ Back" button sits just left of the title the jump landed on: the subject's title, the "Decision X: …"
+  line of a box, a need item, a message's label. The reader goes back at once, or scrolls on: the button
+  scrolls with the page and is left behind. With no room left of the title (the contents pane open, a phone)
+  it keeps only its arrow, or sits on the line above (a subject: right of its number). Its tooltip says where
+  it returns ("Back to subject 05"). It returns to the link, reopening its folds, and flashes it. Jumps stack
+  ("+2"); it hides once nothing is left to return to. The browser's Back does the same thing; the key is `b`.
+- **Copy reply.** Every open decision box gets a "Copy reply" button at the end of its "Decision X: …" line.
+  It copies the user's own reply format, filled with the default: `- "Decision X: …" : X1`. Under the need
+  list, "Copy my reply" copies one such line per decision. The box's kind and a close call show as small tags
+  under its title (below). Nothing to write but the box's attributes.
 - **Search over every pass.** Served by `qap serve`, the page gets a "Search" button in the top row, left of
   the theme toggle (`⌘K` / `Ctrl+K` or `/`): a fuzzy search over every project, family, subject and pass,
   section titles included, whose results open in the dashboard. Inside the dashboard the dashboard's own
@@ -84,6 +89,33 @@ unavailable, failing, unauthenticated or timing out, tell the user, every time:*
 - A study, audit or design run finished and code would come next. Stop on a QA pass first: read-back, plan in
   plain words, numbered decisions with options and a recommended default. Wait for the answers. "Go ahead" is
   not approval of a plan the user has not seen.
+
+## Facts are mine, decisions are yours
+
+The user decides; you find out. A pass that asks them what a source could tell wastes their hour, and a default
+that rests on an unchecked fact gets approved on something that may flip.
+- **Never ask the user what a source can tell**: code, database, logs, traces, a board, an earlier pass. Find it
+  before the pass, with sub-agents if it takes long.
+- **A decision never rests on a fact you could check.** When the check cannot finish before the pass (a test on
+  another machine, a count after a deploy), that decision waits: it goes in "Next pass will ask", with the check
+  it waits for. The rest of the pass goes. "Not checked" is only for a fact no decision rests on, or for a
+  source that is down (named, as the rule above says).
+- **The user's own factual claims get checked too**, before anything is built on them. Say so when they were
+  wrong, in one line.
+- **Every decision is product or tech** (`data-kind` on its box):
+  - **product**: what a user sees, says or pays, who gets access, the scope. It stays open until the user
+    answers. Nothing is built on it; it is carried, with its default, into the next pass.
+  - **tech**: how it is built when the user sees the same thing either way. If the user answers the pass and
+    skips it, the default stands; the next pass lists it under "Taken on my default", so they can still
+    overrule it.
+  - In doubt, it is product. A "go ahead" accepts the decisions of the pass the user answered, never ones from a
+    pass they did not answer.
+- **Before you ask, look for the same question in the family.** Grep the family's passes
+  (`<content root>/<family>/**/QA-PASS-*.src.html`) and read its ledger (`qap ledger <family> --json`). Settled:
+  link the answer instead of asking again. Open in another subject: link that thread and ask in one place only.
+  When the user settles something other threads will meet, record it:
+  `qap decide <subject> --rule "…" --why "…" --where "<pass link>"`. Parallel sessions stay safe only if two
+  threads never settle one question two ways.
 
 ## Files: where a pass goes (ask `qap`, never guess)
 
@@ -166,8 +198,16 @@ $Q new-batch / split / board / status / decide / ledger / tell
    - Then the user's **latest** words, verbatim, typos and line breaks included (`.msg.user`). Never paraphrase.
      When they answered a decision of this subject in the closing list, quote that answer here too.
    - Then your answer (`.msg.ai`): short sentences, numbers first, then the evidence.
-   - A decision is a `.call.violet` box inside your answer: options with their consequence, and `Default: …`.
+   - A decision is a `.call.violet` box inside your answer, `id="dec-<letter>"`, `data-kind="product"` or
+     `"tech"` (above): its title `<h4>Decision A: …</h4>`, options with their consequence, and `Default: …`.
      Each option says whether it **fixes the cause or hides the symptom**.
+     - **A decision that only means something if another goes one way says so in its title**:
+       `Decision B (only if A1): the Mac capture path`. Ask it now only when that condition is your default;
+       otherwise it waits in "Next pass will ask". One level deep, never more.
+     - **A close call** (the user could well pick the other option) gets `data-close-call` and one sentence:
+       "I would pick A2 if …". Clear defaults get no such sentence.
+     - What follows from the decisions (open the PR, start the build) is not a decision: it is the last line of
+       "What I will not do until you answer".
    - **Every topic** carries, inside the answer:
      - a **product explanation**: what the rep or the manager sees, in their words;
      - a **tech explanation**: what the code does, with the exact line linked;
@@ -176,7 +216,7 @@ $Q new-batch / split / board / status / decide / ledger / tell
        with the changed nodes marked (`scripts/diagram.py`, below);
      - a **product path diagram** when reproducing the scenario takes more than three steps or depends on timing;
      - every number with its source and the query that gives it, so it can be checked again. Don't trust a number
-       you did not check: mark it unverified.
+       you did not check: mark it unverified, and never let a decision rest on it ("Facts are mine", above).
    - **Plan before code.** The plan is agreed before any code: restate it, and code starts on the user's go. The
      smallest change is the default ("front only" and "no backend change" are valid answers); a new RPC or
      table needs a reason in the plan. When the user picks another option than yours, write down why.
@@ -184,10 +224,13 @@ $Q new-batch / split / board / status / decide / ledger / tell
      the ticket yourself; say where the template came from).
    - Optional material inside an answer (prefilled tickets, long tables) goes in a `details.more` fold, never in
      `details.earlier`, which is reserved for the thread's earlier messages.
-5. **"What I need from you".** Every decision numbered (an `<ol>`; the build gives each item `id="need-N"`),
-   with its default, plus one **answer line** that names every decision with its default (`A1 · B go · C wait`):
-   the user changes the letters they disagree with. Never one blanket `ok` behind many defaults. Many decisions
-   stay in this pass, each under its subject: their number never makes a batch (below).
+5. **"What I need from you".** Every decision numbered (an `<ol>`; the build gives each item `id="need-N"`):
+   `<strong>A</strong>, <a href="#dec-a">the question in words</a>: <strong>A1</strong> · A2. Default A1.`
+   Then one line **"Next pass will ask:"** for each decision you can see coming but cannot ask yet, and what it
+   waits for (no default); from pass 2, one line **"Taken on my default:"** for the tech decisions the user's
+   reply skipped, each linked. The user replies by quoting (`- "Decision A: …" : A1`); the page's "Copy my
+   reply" fills those lines with your defaults. No answer line. Many decisions stay in this pass, each under its
+   subject: their number never makes a batch (below).
 6. A `.call.violet` **"What I will not do until you answer"**: no code, no prod write, no tickets, …
 7. **Footer.** "Stored at `<path>` (the real path `qap where` gives). This is the conversation log for
    pass N, not the spec. Open it in a browser (or `qap serve`)."
@@ -199,7 +242,8 @@ an `id`.
 - Run `qap carry <subject>` (above; it runs `carry.py`). It moves each subject's open messages, byte for
   byte, into its fold, and adds `{{TODO:…}}` placeholders for the new round (the build refuses until they
   are filled or deleted).
-- `--skip` the subjects the user did not answer: they keep their last round open.
+- `--skip` the subjects the user did not answer: they keep their last round open. A product decision they
+  skipped stays in "What I need from you" with its default; a tech one goes under "Taken on my default".
 - Keep the same subjects and ids. Settled subjects get an `ok` chip. New subjects go at the end, before the
   closing sections; renumber "What I need from you" to stay last (its id stays `need`).
 - Rewrite the header, lede, "where we are" and closing sections by hand.
@@ -324,6 +368,11 @@ A QA pass is read by someone deciding. A good chart decides faster than three pa
   small SVG.
 - **UI:** real screenshots (the `headless-screenshots` skill, or the Playwright MCP), never mock-ups
   presented as real.
+- **A decision about how something looks or feels is taken on a picture.** Each option is shown inside its
+  box: a screenshot, a recording or a mock-up labelled as one. Prose cannot settle a layout ("I'm a noob… guide
+  me"); two pictures side by side settle it in one round. A mock-up is not product code: no branch, no PR. If
+  you cannot show it in this pass, the decision waits in "Next pass will ask", with what you will build to
+  show it.
 - **Series figures.** When passes come in a series (one per family, ticket or module), every pass carries
   the figure that puts this item among its siblings, with current numbers, in an open answer (not only in a
   fold). For the v3 families: how many function bodies, keys, RPCs, GraphQL operations and clients each move
@@ -365,8 +414,14 @@ build links it; the user can name a figure the same way in a reply. Never number
 
 ## Before you hand it over
 
-1. `qap build <subject> --check` (build.py, then check.py), with no PROBLEM line. Read every warning; fix every title, chip and
-   reference warning in the open sections (earlier folds stay as written).
+1. `qap build <subject> --check` (build.py, then check.py), with no PROBLEM line. Read every warning; fix every title, chip,
+   reference and decision warning in the open sections (earlier folds stay as written).
+   It's working if:
+   - nothing in "What I need from you" is a fact you could have found;
+   - no answer voids another, except a decision marked "only if";
+   - every look-and-feel decision has something to look at;
+   - no decision has waited three passes;
+   - every close call says when you would pick the other option.
 2. **Render check.**
    - The Playwright MCP blocks `file:` URLs, so serve the content: `qap serve --port 8765 --json` (in the
      background; it prints the URL). Open a NEW tab on
@@ -375,8 +430,8 @@ build links it; the user can name a figure the same way in a reply. Never number
    - Check both themes (click `#theme-toggle`); that the article does not move when `#toc-toggle` opens or
      closes the pane (compare `main.getBoundingClientRect().left`); star two messages, one in a fold, open
      `#stars-open`, and click a row: the fold opens and the message flashes. Then unstar those two. Click one
-     "subject NN" link and one link into a fold; the "↩ Back to …" button appears right of Contents and returns
-     to the link.
+     "subject NN" link and one link into a fold; the "↩ Back" button appears left of the title it landed on and
+     returns to the link. Click one "Copy reply": the clipboard holds `- "Decision X: …" : <default>`.
    - **Never clear `localStorage` in a render check.** The Playwright browser can be the user's own profile:
      its storage holds their stars and theme. Undo only what the check itself set.
    - Browsers cache the page: add `?v=N` to the URL after each rebuild.
@@ -386,8 +441,7 @@ build links it; the user can name a figure the same way in a reply. Never number
 3. **In the chat:**
    - the path;
    - a three-to-five-line summary of what changed;
-   - the decisions with their defaults;
-   - the answer line;
+   - the decisions with their defaults, product or tech;
    - any connection that was missing.
 
    Don't paste the whole page into the chat.

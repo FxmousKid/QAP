@@ -20,7 +20,14 @@ Warnings (think twice):
   - a subject with no open message from the user or no open answer;
   - a fold holding only one-line paragraphs while the original likely had lists (copy the original formatting);
   - no figure at all, or a numbers-heavy page with few figures;
-  - decision boxes without a default, or without the "What I need from you" section.
+  - decision boxes without a default, or without the "What I need from you" section;
+  - an open decision box (div.call.violet id="dec-…") without data-kind="product" or "tech" (a product decision
+    stays open until the user answers; a tech one takes its default when they skip it);
+  - a decision resting on a fact marked unchecked ("not checked", "unverified", "did not check"): check the fact
+    before the pass, or make the decision wait and say which check;
+  - "Decision B (only if A1)" when no open Decision A is in the pass: ask it once its parent is settled, or put
+    it in "Next pass will ask";
+  - a close call (data-close-call) that does not say when you would pick the other option.
 """
 from __future__ import annotations
 
@@ -105,6 +112,7 @@ class Scan(HTMLParser):
         self.chip: dict | None = None
         self.refs: list[dict] = []
         self.recent = ""
+        self.boxes: list[dict] = []
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -131,11 +139,15 @@ class Scan(HTMLParser):
             self.earlier += 1
             if "open" in a:
                 self.earlier_open += 1
+        info: dict = {}
         if tag == "div" and "call" in cls and "violet" in cls:
             self.calls_violet += 1
+            if str(a.get("id") or "").startswith("dec-"):
+                info = {"box": {"id": a.get("id"), "kind": a.get("data-kind"), "close": "data-close-call" in a,
+                                "fold": in_fold, "text": ""}}
+                self.boxes.append(info["box"])
         if tag == "div" and ({"q"} & cls or (in_fold and {"me", "you"} & cls)):
             self.old_format += 1
-        info: dict = {}
         if tag == "div" and "msg" in cls:
             info = {"id": a.get("id"), "kind": "user" if "user" in cls else "ai", "fold": in_fold,
                     "section": self.section, "who": None, "ai_label": False, "lists": 0, "paras": 0}
@@ -184,6 +196,10 @@ class Scan(HTMLParser):
             self.who_text["who"] += data
         if self.chip is not None:
             self.chip["text"] += data
+        for _, _, info in reversed(self.stack):
+            if info.get("box") is not None:
+                info["box"]["text"] += data
+                break
         tags = [t for t, _, _ in self.stack]
         if "script" in tags or "style" in tags or "title" in tags:
             return
@@ -197,6 +213,39 @@ class Scan(HTMLParser):
                 self.refs.append({"section": self.section, "ref": m.group(0), "fold": fold,
                                   "context": " ".join((context + m.group(0)).split())})
         self.recent = (self.recent + data)[-80:]
+
+
+UNCHECKED = re.compile(r"\b(?:not (?:yet )?(?:checked|verified)|unverified|did not (?:check|verify)|didn't (?:check|verify))\b",
+                       re.I)
+ONLY_IF = re.compile(r"^\s*Decision\s+([A-Z]\d{0,2})\s*\(only if\s+([A-Z])(\d{1,2}[a-z]?)\)")
+BOX_LETTER = re.compile(r"^\s*Decision\s+([A-Z]\d{0,2})\b")
+PICK_OTHER = re.compile(r"\b(?:I would|I'd|I would only|I'd only)\s+(?:only\s+)?pick\b", re.I)
+
+
+def decision_warnings(boxes: list[dict]) -> list[str]:
+    """The rules on the open decision boxes of this pass (earlier folds keep what they said)."""
+    open_boxes = [b for b in boxes if not b["fold"]]
+    warnings = []
+    no_kind = [b["id"] for b in open_boxes if b["kind"] not in ("product", "tech")]
+    if no_kind:
+        warnings.append(f"{len(no_kind)} decision box(es) without data-kind=\"product\" or \"tech\": {no_kind[:8]} "
+                        "(a product decision stays open until answered; a tech one takes its default if skipped)")
+    unchecked = [b["id"] for b in open_boxes if UNCHECKED.search(b["text"])]
+    if unchecked:
+        warnings.append(f"{unchecked[:8]}: a decision rests on a fact marked unchecked: check it before the pass, or "
+                        "make the decision wait and say which check")
+    letters = {m.group(1) for b in open_boxes for m in [BOX_LETTER.match(b["text"])] if m}
+    for b in open_boxes:
+        m = ONLY_IF.match(b["text"])
+        if m and m.group(2) not in letters:
+            warnings.append(f"{b['id']}: Decision {m.group(1)} is \"only if {m.group(2)}{m.group(3)}\" but no open "
+                            f"Decision {m.group(2)} is in this pass: ask it once its parent is settled, or put it in "
+                            "\"Next pass will ask\"")
+    close = [b["id"] for b in open_boxes if b["close"] and not PICK_OTHER.search(b["text"])]
+    if close:
+        warnings.append(f"{close[:8]}: a close call without when you would pick the other option "
+                        "(\"I would pick A2 if …\")")
+    return warnings
 
 
 def _load_triage():
@@ -266,9 +315,10 @@ def main(path: str) -> int:
     if scan.figures and numbers / max(1, scan.figures) > 40:
         warnings.append(f"{numbers} percentages for {scan.figures} figure(s): consider another chart")
     if scan.calls_violet and "What I need from you" not in html:
-        warnings.append("decision boxes but no 'What I need from you' section with the answer line")
+        warnings.append("decision boxes but no 'What I need from you' section")
     if scan.calls_violet and "Default" not in html:
         warnings.append("decision boxes without a 'Default:'")
+    warnings += decision_warnings(scan.boxes)
     ids = set(scan.ids)
     broken = sorted({h for h in scan.hrefs if h not in ("#", "#top") and h[1:] not in ids})
     if broken:

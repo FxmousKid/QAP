@@ -1,7 +1,8 @@
 // QA pass page behaviour: theme toggle, the contents pane (fixed, never pushes the article) with scroll-spy and
 // what moved since the last pass (NEW signs, counts, "Only what's new"),
 // screen detection (pixel ratio, width tier, ultrawide), message labels (pass + star on every message) and
-// the "View ★s" dialog, a reference list of starred messages, the "back to where I clicked" button, and the
+// the "View ★s" dialog, a reference list of starred messages, the "back to where I clicked" button, a "Copy reply"
+// button on every decision (the reader's own reply format, filled with the default), and the
 // search over every pass when the page is served by `qap serve`; in a triage pass, each group's latest round
 // shown inside the page (served), and a page opened with ?embed=1 drawn as that frame.
 // The theme, the pane state and the pixel ratio are first applied before paint by the inline boot snippet in
@@ -34,6 +35,7 @@
     var button = document.getElementById("toc-toggle");
     if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
     if (remember && !narrow()) store("qa-toc", open ? "open" : "closed");
+    setTimeout(placeBack, 320);  // the back button's room left of a title changes with the pane (after its slide)
   }
 
   // ---- screen detection ----
@@ -60,7 +62,7 @@
         " · pixel ratio " + Math.round(dpr * 100) / 100 + " · layout " + root.dataset.size +
         (root.dataset.ultrawide === "1" ? " · ultrawide" : "");
     }
-    placeTop();  // the top row's buttons moved (window width, star count): the back button's room follows
+    placeTop();  // the top row's buttons moved (window width, star count); the back button follows its title
   }
 
   // The right-hand buttons sit side by side from the right edge: View ★s, the theme toggle, Share, then Search.
@@ -392,16 +394,16 @@
   }
 
   // ---- "back to where I clicked" ----
-  // A jump through an in-page link (or a row of the stars dialog) records where the reader was: the link
-  // itself and its height on the screen. A small, faint button then shows in the top row, right of
-  // ☰ Contents ("↩ Back to subject 05", "↩ Back to What I need from you"). It returns to the link,
-  // opening the folds around it if they were closed, and flashes it. Jumps stack: after one return the
-  // button offers the previous origin, until none is left. It fades out by itself 20 s after the last jump
-  // (hovering it keeps it), and comes back with the next jump. Each jump is a history entry, so the
-  // browser's Back does the same thing. Key: b.
-  var BACK_MS = 20000;
-  var origins = [];          // [{el, top, y}], oldest first
-  var backTimer = 0;
+  // A jump through an in-page link (or a row of the stars dialog) records where the reader was (the link itself
+  // and its height on the screen) and where they landed. A small "↩ Back" button then sits in the page, just
+  // left of the title of what the jump landed on: a subject's title, a decision box's "Decision X: …" line, a
+  // need item, a message's label. The reader can go back at once, or scroll on and leave it behind: it scrolls
+  // with the page, it is not pinned to the screen. With no room left of the title (the contents pane open, a
+  // phone), it sits on the line above (a subject: right of its number). It returns to the link, opening the
+  // folds around it if they were closed, and flashes it. Jumps stack: after one return the button offers the
+  // previous origin, by the title the jump before landed on. Each jump is a history entry, so the browser's
+  // Back does the same thing. Key: b.
+  var origins = [];          // [{el, top, y, landed}], oldest first
   var restoringUntil = 0;    // the hashchange that follows a return must not jump again
 
   function backButton() {
@@ -411,30 +413,82 @@
     b.type = "button";
     b.id = "back-to-link";
     b.hidden = true;
-    b.innerHTML = '<span class="bk-arrow" aria-hidden="true">↩</span><span class="bk-text"></span><span class="bk-more"></span>';
-    b.addEventListener("click", goBack);
-    b.addEventListener("mouseenter", function () { clearTimeout(backTimer); b.classList.remove("fading"); });
-    b.addEventListener("mouseleave", function () { if (!b.hidden) armBack(); });
+    b.innerHTML = '<span class="bk-arrow" aria-hidden="true">↩</span><span class="bk-text">Back</span><span class="bk-more"></span>';
     document.body.appendChild(b);
     return b;
   }
 
-  function placeBack() {
-    // Docked in the top row, right of ☰ Contents, in the room before the theme toggle, on every layout: it
-    // never covers the header or the line a jump lands on (60 px down). With little room it keeps only its
-    // arrow ("+N" becomes a corner badge; the full label stays in its tooltip and aria-label); with none (the
-    // smallest phones) it moves to the bottom left corner.
-    var toc = document.getElementById("toc-toggle");
-    var first = document.getElementById("search-open") || document.getElementById("share-open") || document.getElementById("theme-toggle");  // the right group's leftmost
-    var b = document.getElementById("back-to-link");
-    var left = toc ? toc.getBoundingClientRect().right + 8 : 16;
-    var room = Math.floor((first ? first.getBoundingClientRect().left - 8 : window.innerWidth - 16) - left);
-    root.style.setProperty("--back-left", Math.round(left) + "px");
-    root.style.setProperty("--back-room", Math.max(0, room) + "px");
-    if (b) {
-      b.classList.toggle("compact", room < 96);
-      b.classList.toggle("low", room < 30);
+  function landingTitle(el) {
+    // The line a jump lands on: a heading, the "Decision X: …" line of a box, a message's label, else the target.
+    if (!el) return null;
+    if (/^H[1-4]$/.test(el.tagName)) return el;
+    for (var i = 0; i < el.children.length; i++) {
+      var c = el.children[i];
+      if (/^H[2-4]$/.test(c.tagName) || c.classList.contains("who")) return c;
     }
+    return el;
+  }
+
+  function firstLine(el, skip) {
+    // The box of the first line of text in el (a title that wraps: its first line), skipping a .n number span.
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.textContent.trim()) return NodeFilter.FILTER_REJECT;
+        if (skip && n.parentElement && n.parentElement.closest(skip)) return NodeFilter.FILTER_REJECT;
+        if (n.parentElement && n.parentElement.closest("#back-to-link, .dec-copy, .dec-tags, .star, .sign")) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var node = walker.nextNode();
+    if (node) {
+      var range = document.createRange();
+      range.selectNodeContents(node);
+      var rects = range.getClientRects();
+      if (rects.length) return rects[0];
+    }
+    return el.getBoundingClientRect();
+  }
+
+  function placeBack() {
+    var b = document.getElementById("back-to-link");
+    var o = origins[origins.length - 1];
+    if (!b || !o || b.hidden) return;
+    var t = o.landed && o.landed.isConnected ? o.landed : null;
+    if (!t || !t.getClientRects().length) { b.style.visibility = "hidden"; return; }  // in a closed fold
+    b.style.visibility = "";
+    b.classList.remove("compact", "above");
+    var r = firstLine(t, t.tagName === "H2" ? ".n" : null);
+    // A title inside a box (a decision's "Decision X: …" line) is matched from outside the box, never on its border.
+    var outer = t.closest(".call") || t;
+    var o2 = outer === t ? r : outer.getBoundingClientRect();
+    var floor = 4;
+    var side = document.querySelector("aside.side");
+    if (side && root.classList.contains("toc-open") && !narrow()) floor = side.getBoundingClientRect().right + 2;
+    var gap = 6, left = null, top, bw = b.offsetWidth, bh = b.offsetHeight;
+    var middle = function () { return r.top + (r.height - bh) / 2; };
+    if (o2.left - gap - bw >= floor) {                       // the whole button, left of the title (or its box)
+      left = o2.left - gap - bw; top = middle();
+    } else {
+      b.classList.add("compact"); bw = b.offsetWidth; bh = b.offsetHeight;
+      if (o2.left - 3 - bw >= floor) {                       // only the arrow, in the gutter left of it
+        left = o2.left - 3 - bw; top = middle();
+      } else if (outer !== t && r.left - bw - 2 >= o2.left + 3) {  // only the arrow, inside the box, left of its title
+        left = r.left - bw - 3; top = middle();
+      } else {
+        b.classList.add("above");
+        var n = t.tagName === "H2" ? t.querySelector(".n") : null;
+        if (n && n.getClientRects().length) {               // a subject: on its number's line, right of the number
+          var nr = firstLine(n);
+          left = nr.right + 12; top = nr.top + (nr.height - bh) / 2;
+        } else {                                             // else at the end of the title's first line
+          var copy = t.querySelector(".dec-copy");             // (after a decision's Copy reply button)
+          var end = copy && copy.getClientRects().length ? copy.getBoundingClientRect().right : r.right;
+          left = Math.min(end + 8, window.innerWidth - bw - 8); top = middle();
+        }
+      }
+    }
+    b.style.left = Math.round(left + window.scrollX) + "px";
+    b.style.top = Math.round(top + window.scrollY) + "px";
   }
 
   function whereIs(el) {
@@ -458,11 +512,11 @@
     return hit && hit.closest ? hit.closest("p, li, h2, h3, .msg, figure, pre, table, .call, header") : null;
   }
 
-  function recordOrigin(el) {
+  function recordOrigin(el, targetId) {
     el = el || readingSpot();
-    origins.push({ el: el, top: el ? el.getBoundingClientRect().top : 0, y: window.scrollY });
+    var target = targetId ? document.getElementById(targetId) : null;
+    origins.push({ el: el, top: el ? el.getBoundingClientRect().top : 0, y: window.scrollY, landed: landingTitle(target) });
     if (origins.length > 30) origins.shift();
-    showBack();
   }
 
   function showBack() {
@@ -471,31 +525,17 @@
     var o = origins[origins.length - 1];
     var label = "Back to " + (o.el ? whereIs(o.el) : "where you were");
     var more = origins.length > 1 ? "; " + (origins.length - 1) + " more jump(s) before it" : "";
-    b.querySelector(".bk-text").textContent = label;
     b.querySelector(".bk-more").textContent = origins.length > 1 ? "+" + (origins.length - 1) : "";
-    // The label also lives in the tooltip and the accessible name: a narrow window shows only the arrow.
+    // The full label lives in the tooltip and the accessible name; the button itself says "Back".
     b.title = label + ": return to the link you clicked (b)" + more;
     b.setAttribute("aria-label", label + more);
-    placeBack();
     b.hidden = false;
-    b.classList.remove("fading");
-    armBack();
-  }
-
-  function armBack() {
-    clearTimeout(backTimer);
-    backTimer = setTimeout(function () {
-      var b = document.getElementById("back-to-link");
-      if (!b) return;
-      b.classList.add("fading");
-      backTimer = setTimeout(function () { b.hidden = true; b.classList.remove("fading"); }, 600);
-    }, BACK_MS);
+    placeBack();
   }
 
   function hideBack() {
-    clearTimeout(backTimer);
     var b = document.getElementById("back-to-link");
-    if (b) { b.hidden = true; b.classList.remove("fading"); }
+    if (b) b.hidden = true;
   }
 
   function restore(o) {
@@ -811,12 +851,97 @@
     var lines = messages.filter(function (m) { return stars[m.id]; }).map(function (m) {
       return m.num + " " + m.subject + " · " + m.labelText + (m.pass !== "" ? " · " + passLabel(m.pass) : "") + " · #" + m.id + "\n    " + m.excerpt;
     });
-    var text = "Starred messages (" + project + ")\n" + lines.join("\n");
+    return copyText("Starred messages (" + project + ")\n" + lines.join("\n"));
+  }
+
+  function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
     var ta = document.createElement("textarea");
     ta.value = text; document.body.appendChild(ta); ta.select();
     try { document.execCommand("copy"); } catch (e) {}
     ta.remove();
+  }
+
+  // ---- "Copy reply": the reader answers by quoting a decision's line, so the page writes that line for them ----
+  // Every open decision box (div.call.violet with an id dec-…, outside the earlier folds) gets a small button at
+  // the end of its "Decision X: …" line. It copies
+  //     - "Decision X: …" : <the default>
+  // the reader's own reply format, filled with the default: they change what they disagree with and paste it
+  // back. Under "What I need from you", "Copy my reply" copies every line at once. The box's kind (data-kind:
+  // product, which stays open until answered; tech, whose default stands if the reader skips it) and a close
+  // call (data-close-call) show as small tags under its title. Idempotent: a downloaded page keeps its buttons.
+  function decisionBoxes() {
+    return Array.prototype.filter.call(document.querySelectorAll('main div.call.violet[id^="dec-"]'), function (box) {
+      return !box.closest("details.earlier") && box.querySelector("h4");
+    });
+  }
+
+  function decisionTitle(box) {
+    if (!box.hasAttribute("data-title")) {
+      var h4 = box.querySelector("h4").cloneNode(true);
+      h4.querySelectorAll(".dec-copy").forEach(function (x) { x.remove(); });
+      box.setAttribute("data-title", h4.textContent.replace(/\s+/g, " ").trim());
+    }
+    return box.getAttribute("data-title");
+  }
+
+  function decisionDefault(box) {
+    var clone = box.cloneNode(true);
+    clone.querySelectorAll(".dec-copy, .dec-tags, h4").forEach(function (x) { x.remove(); });
+    var m = /Default:\s*(.*?)(?:\.(?:\s|$)|$)/.exec(clone.textContent.replace(/\s+/g, " ").trim());
+    return m ? m[1].trim() : "";
+  }
+
+  function replyLine(box) { return '- "' + decisionTitle(box) + '" : ' + decisionDefault(box); }
+
+  var KINDS = { product: "product · open until you answer", tech: "tech · my default if you skip it" };
+
+  function setupReplies() {
+    var boxes = decisionBoxes();
+    boxes.forEach(function (box) {
+      var h4 = box.querySelector("h4");
+      decisionTitle(box);
+      if (!box.querySelector(".dec-tags")) {
+        var tags = [];
+        var kind = box.getAttribute("data-kind");
+        if (KINDS[kind]) tags.push('<span class="dec-tag ' + kind + '">' + KINDS[kind] + "</span>");
+        if (box.hasAttribute("data-close-call")) tags.push('<span class="dec-tag close">close call</span>');
+        if (tags.length) {
+          var row = document.createElement("div");
+          row.className = "dec-tags";
+          row.innerHTML = tags.join("");
+          h4.insertAdjacentElement("afterend", row);
+        }
+      }
+      if (!h4.querySelector(".dec-copy")) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "dec-copy";
+        btn.textContent = "Copy reply";
+        btn.title = "Copy " + replyLine(box) + "  (change what you disagree with, then paste it back)";
+        h4.appendChild(btn);
+      }
+    });
+    var need = document.getElementById("need");
+    if (!boxes.length || !need || document.querySelector(".reply-copy")) return;
+    var list = need.nextElementSibling;
+    while (list && list.tagName !== "OL" && list.tagName !== "H2") list = list.nextElementSibling;
+    var p = document.createElement("p");
+    p.className = "reply-copy";
+    p.innerHTML = '<button type="button" class="dec-copy all">Copy my reply</button><span>' + boxes.length +
+      " line" + (boxes.length > 1 ? "s" : "") + ", one per decision, each with my default: change what you disagree with, " +
+      "then paste it back.</span>";
+    if (list && list.tagName === "OL") list.insertAdjacentElement("afterend", p); else need.insertAdjacentElement("afterend", p);
+  }
+
+  function copyReply(btn) {
+    var text = btn.classList.contains("all")
+      ? decisionBoxes().map(replyLine).join("\n")
+      : replyLine(btn.closest("div.call.violet"));
+    var label = btn.textContent;
+    var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = label; }, 1400); };
+    var p = copyText(text);
+    if (p && p.then) p.then(done, done); else done();
   }
 
   function countFolds() {
@@ -1066,6 +1191,11 @@
     applySeed();
     paintStars();
     markNews(tocLinks);
+    setupReplies();
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest("button.dec-copy");
+      if (btn) { e.preventDefault(); copyReply(btn); }
+    });
 
     var dlg = buildDialog();
     var starsButton = document.getElementById("stars-open");
@@ -1084,7 +1214,7 @@
       var go = e.target.closest && e.target.closest("[data-go]");
       if (go && dlg.contains(go)) {
         var id = go.getAttribute("data-go");
-        if (document.getElementById(id)) { dlg.close(); recordOrigin(null); goTo(id, true); }
+        if (document.getElementById(id)) { dlg.close(); recordOrigin(null, id); goTo(id, true); showBack(); }
         return;
       }
       var act = e.target.closest && e.target.closest("[data-act]");
@@ -1107,8 +1237,9 @@
       var id = decodeURIComponent(a.getAttribute("href").slice(1));
       if (!id || !document.getElementById(id)) return;
       e.preventDefault();
-      recordOrigin(a);
+      recordOrigin(a, id);
       goTo(id, true);
+      showBack();
     });
 
     // Deep links (#p3-1a, or any id inside a closed fold) unfold what hides the target. On Back and Forward,
@@ -1121,6 +1252,8 @@
     };
     window.addEventListener("hashchange", openHash);
     openHash(true);
+    // A fold opened or closed above the back button's title moves the title: follow it.
+    document.addEventListener("toggle", function () { placeBack(); }, true);
     // Inlined images get their height while the page loads and push a deep-linked target down: align it again.
     window.addEventListener("load", function () {
       var id = decodeURIComponent((location.hash || "").slice(1));
@@ -1128,6 +1261,7 @@
       if (!el) return;
       var top = el.getBoundingClientRect().top;
       if (top < 0 || top > 140) { el.scrollIntoView({ behavior: "instant", block: "start" }); window.scrollBy({ top: -60, behavior: "instant" }); }
+      placeBack();
     });
   });
 })();

@@ -43,6 +43,11 @@ uv run --project . python -m unittest discover -s tests
 | skip leaves that subject open. stars writes the copied message ids into the new page. | `skill/scripts/carry.py` | `tests.test_pages.Carry.test_skip_keeps_the_round_open_and_stars_are_seeded` |
 | decision_codes follows the examples next to the regex. | `skill/scripts/check.py` | `tests.test_pages.Check.test_decision_codes_match_the_table` |
 | check exits 1 when the page has a problem, and exits 0 when the only findings are warnings. | `skill/scripts/check.py` | `tests.test_pages.Check.test_problems_fail_and_a_sound_page_does_not` |
+| An open decision box without data-kind product or tech is a warning, never a failure. | `skill/scripts/check.py` | `tests.test_pages.Check.test_a_decision_needs_its_kind` |
+| A decision box that says a fact is not checked is a warning. | `skill/scripts/check.py` | `tests.test_pages.Check.test_a_decision_resting_on_an_unchecked_fact_warns` |
+| "Decision B (only if A1)" warns when no open Decision A is in the pass. | `skill/scripts/check.py` | `tests.test_pages.Check.test_only_if_needs_its_parent_in_the_pass` |
+| A close call warns until it says when the other option wins. | `skill/scripts/check.py` | `tests.test_pages.Check.test_a_close_call_says_when_the_other_option_wins` |
+| Decision boxes in earlier folds are not checked: they keep what they said. | `skill/scripts/check.py` | `tests.test_pages.Check.test_folded_boxes_keep_what_they_said` |
 | seed_first fills the three PROJECT slots and escapes the project name. | `src/qap/skill.py` | `tests.test_pages.Seed.test_only_the_three_template_slots_are_filled` |
 | The second search returns the cached index and does not open the pages again. | `src/qap/snapshot.py` | `tests.test_snapshot.Snapshot.test_the_second_read_does_not_open_the_pages_again` |
 | Editing a pass file changes the cached tree. | `src/qap/snapshot.py` | `tests.test_snapshot.Snapshot.test_editing_a_pass_invalidates_the_cache` |

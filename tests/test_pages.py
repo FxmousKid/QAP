@@ -167,6 +167,57 @@ class Check(unittest.TestCase):
         self.assertIn("#missing", out)
 
 
+    def page_with(self, *boxes: str, folded: str = "") -> str:
+        body = "".join(boxes)
+        fold = f'<details class="earlier"><summary>Earlier</summary>{folded}</details>' if folded else ""
+        return SOUND.replace("<p>Hello.</p>", f"<p>Hello.</p>{body}", 1).replace(
+            '<div class="msg user"', f'{fold}<div class="msg user"', 1).replace(
+            "</main>", '<h2 id="need">What I need from you</h2></main>', 1)
+
+    def box(self, letter: str, title: str, body: str = "<strong>Default: X1.</strong>", attrs: str = ' data-kind="tech"') -> str:
+        return (f'<div class="call violet" id="dec-{letter.lower()}"{attrs}><h4>Decision {letter}: {title}</h4>'
+                f"<p>{body}</p></div>")
+
+    def test_a_sound_decision_box_raises_no_decision_warning(self):
+        code, out = self.run_check(self.page_with(self.box("A", "which stack")))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("data-kind", out)
+        self.assertNotIn("unchecked", out)
+
+    def test_a_decision_needs_its_kind(self):
+        code, out = self.run_check(self.page_with(self.box("A", "which stack", attrs="")))
+        self.assertEqual(code, 0, out)  # a warning, never a failure
+        self.assertIn('without data-kind="product" or "tech"', out)
+        self.assertIn("dec-a", out)
+
+    def test_a_decision_resting_on_an_unchecked_fact_warns(self):
+        box = self.box("B", "delete the 17 functions", "Default: B1. Not checked: the two outside tools.")
+        _, out = self.run_check(self.page_with(box))
+        self.assertIn("rests on a fact marked unchecked", out)
+
+    def test_only_if_needs_its_parent_in_the_pass(self):
+        child = self.box("B", "the capture path", attrs=' data-kind="tech"').replace("Decision B:", "Decision B (only if A1):")
+        _, out = self.run_check(self.page_with(child))
+        self.assertIn('no open Decision A is in this pass', out)
+        _, out = self.run_check(self.page_with(self.box("A", "which stack"), child))
+        self.assertNotIn("no open Decision A", out)
+
+    def test_a_close_call_says_when_the_other_option_wins(self):
+        close = self.box("C", "silence", attrs=' data-kind="product" data-close-call')
+        _, out = self.run_check(self.page_with(close))
+        self.assertIn("close call without when you would pick", out)
+        argued = self.box("C", "silence", "Default: C1. I would pick C2 if the runs are overnight.",
+                          attrs=' data-kind="product" data-close-call')
+        _, out = self.run_check(self.page_with(argued))
+        self.assertNotIn("close call", out)
+
+    def test_folded_boxes_keep_what_they_said(self):
+        old = self.box("Z", "an old question", "Default: Z1. Not checked: anything.", attrs="")
+        _, out = self.run_check(self.page_with(self.box("A", "which stack"), folded=old))
+        self.assertNotIn("dec-z", out)
+        self.assertNotIn("unchecked", out)
+
+
 class Seed(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

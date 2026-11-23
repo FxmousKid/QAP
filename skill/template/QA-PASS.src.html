@@ -71,7 +71,14 @@
 step 1   what happens
 step 2   what happens <b>next</b></pre>
 
-  <div class="call violet" id="dec-a"><h4>Decision A: the question, in one line</h4>
+  <!-- A decision box: id dec-<letter>, and data-kind:
+         "product": what a user sees, says or pays, who gets access, the scope: it stays open until the user answers;
+         "tech": how it is built when the user sees the same thing: if the user's reply skips it, the default stands
+                 (the next pass lists it under "Taken on my default").
+       data-close-call when the user could well pick the other option: then one sentence "I would pick A2 if …".
+       "Decision B (only if A1): …" when B means something only if A goes one way; ask it only when that is your
+       default, else it waits in "Next pass will ask". The page adds a "Copy reply" button and the tags itself. -->
+  <div class="call violet" id="dec-a" data-kind="product"><h4>Decision A: the question, in one line</h4>
   <p><strong>A1</strong>: the recommended option and its consequence · A2: the alternative and its consequence. <strong>Default: A1.</strong></p></div>
 </div>
 
@@ -83,13 +90,17 @@ step 2   what happens <b>next</b></pre>
 <!-- ================= closing ================= -->
 <h2 id="need"><span class="n">NN</span>What I need from you</h2>
 <ol>  <!-- the build gives each item id="need-N", so "need item 1" anywhere in the page links here -->
-  <li><strong>A</strong> (<a href="#dec-a">decision A</a>). The question, in words: <strong>A1</strong> · A2. Default A1.</li>
+  <li><strong>A</strong>, <a href="#dec-a">the question in words</a>: <strong>A1</strong> · A2. Default A1.</li>
 </ol>
-<p>Answer line: <code>A1</code> is every default; change any letter you disagree with. Or reply point by point, quoting what you answer; each reply goes into its own thread in the next pass.</p>
+<!-- <p><b>Next pass will ask:</b> one line per decision you can see coming but cannot ask yet, and what it waits
+     for ("when Windows starts, once you pick the stack"). No default.</p>
+     Pass 2 on: <p><b>Taken on my default:</b> the tech decisions the user's reply skipped, each linked.</p> -->
+<p>Reply point by point, quoting what you answer; “Copy my reply” gives one line per decision, filled with my default. Each reply goes into its own thread in the next pass.</p>
 
 <div class="call violet">
   <h4>What I will not do until you answer</h4>
-  <p>The concrete list of things that stay untouched (no code, no prod write, no tickets…).</p>
+  <p>The concrete list of things that stay untouched (no code, no prod write, no tickets…), and what follows from the
+    decisions once they are answered (open the PR, start the build): those are not decisions.</p>
 </div>
 
 <footer>

@@ -161,33 +161,45 @@ dialog#share-dialog pre.cmd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere
 dialog#share-dialog .row{display:flex;gap:8px;justify-content:flex-end}
 @media print{#search-open,#search-hint,#share-open,#share-menu,#share-note{display:none}}
 
-/* ===== "back to where I clicked": faint until hovered, in the top row right of the Contents button =====
-   qa-pass.js shows it after an in-page jump and fades it out 20 s later. It sets --back-left (Contents' right
-   edge + 8 px) and --back-room (the room before the theme toggle), so on every layout it sits next to Contents
-   and never covers the header or the line a jump lands on; .compact keeps only the arrow when the room is
-   small, .low (no room at all) moves it to the bottom left. */
-#back-to-link{position:fixed;top:14px;left:var(--back-left,var(--edge));z-index:31;display:flex;align-items:center;gap:6px;
-  max-width:min(46ch,var(--back-room,calc(100vw - 32px)));border:1px solid var(--rule2);border-radius:999px;padding:6px 12px 6px 10px;
-  background:var(--surface);color:var(--ink3);font:600 .75rem/1 var(--mono);cursor:pointer;
-  box-shadow:0 1px 3px rgba(0,0,0,.08);transition:opacity .2s ease,transform .2s ease,color .2s ease;animation:back-in .25s ease}
-/* faint through its muted label and border, never see-through: the text scrolling under the top row stays hidden */
+/* ===== "back to where I clicked": in the page, just left of the title a jump landed on =====
+   qa-pass.js places it in document coordinates (position:absolute), so it scrolls with the page: the reader goes
+   back at once, or scrolls on and leaves it behind. .compact keeps only the arrow when the room left of the title
+   is small (in the gutter, or inside a decision box left of its title); .above, with no room at all, puts it on the
+   subject's number line, right of the number, or at the end of the title's first line. */
+#back-to-link{position:absolute;top:0;left:0;z-index:6;display:flex;align-items:center;gap:6px;white-space:nowrap;
+  border:1px solid var(--rule2);border-radius:999px;padding:5px 11px 5px 9px;
+  background:var(--surface);color:var(--ink2);font:600 .75rem/1 var(--mono);cursor:pointer;
+  box-shadow:0 1px 3px rgba(0,0,0,.08);transition:color .2s ease,border-color .2s ease;animation:back-in .25s ease}
 #back-to-link[hidden]{display:none}
 #back-to-link:hover,#back-to-link:focus-visible{color:var(--ink);border-color:var(--gold)}
 #back-to-link:hover .bk-arrow,#back-to-link:focus-visible .bk-arrow{color:var(--gold)}
 #back-to-link:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-#back-to-link.fading{opacity:0;transform:translateY(-4px)}
-#back-to-link .bk-arrow{color:color-mix(in oklab,var(--gold) 70%,var(--surface));font-size:.95rem;line-height:.75rem}  /* the pill is as tall as Contents */
-#back-to-link .bk-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#back-to-link .bk-arrow{color:color-mix(in oklab,var(--gold) 80%,var(--surface));font-size:.95rem;line-height:.75rem}
 #back-to-link .bk-more:empty{display:none}
 #back-to-link .bk-more{color:var(--ink3);font-weight:500}
-@keyframes back-in{from{opacity:0;transform:translateY(-4px)}}
+@keyframes back-in{from{opacity:0;transform:translateX(4px)}}
 a.flash{border-radius:4px}
-#back-to-link.compact{padding:6px 9px}
+#back-to-link.compact{padding:3px 4px;gap:0;border-color:color-mix(in oklab,var(--gold) 65%,var(--rule2))}
+#back-to-link.compact .bk-arrow{font-size:.85rem;color:var(--gold)}
 #back-to-link.compact .bk-text{display:none}
 #back-to-link.compact .bk-more{position:absolute;top:-6px;right:-8px;padding:2px 4px;border:1px solid var(--rule2);
   border-radius:999px;background:var(--surface);font-size:.625rem;line-height:1}
-#back-to-link.low{top:auto;bottom:16px;left:16px;max-width:calc(100vw - 32px)}
 @media print{#back-to-link{display:none}}
+
+/* ===== decision boxes: "Copy reply" at the end of the "Decision X: …" line, the kind and close-call tags under it,
+   and "Copy my reply" under the need list (qa-pass.js). Never selected with the title: a quote stays the title. */
+.dec-copy{font:600 .6875rem/1 var(--mono);letter-spacing:.03em;margin-left:10px;padding:4px 9px;border:1px solid var(--rule2);
+  border-radius:999px;background:var(--surface);color:var(--ink3);cursor:pointer;vertical-align:2px;
+  user-select:none;-webkit-user-select:none;transition:color .2s ease,border-color .2s ease}
+.dec-copy:hover,.dec-copy:focus-visible{color:var(--s2);border-color:var(--s2)}
+.dec-tags{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 10px;user-select:none;-webkit-user-select:none}
+.dec-tag{font:600 .625rem/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;padding:4px 7px;border-radius:4px}
+.dec-tag.product{background:color-mix(in oklab,var(--s2) 14%,transparent);color:var(--s2)}
+.dec-tag.tech{background:color-mix(in oklab,var(--s4) 14%,transparent);color:var(--s4)}
+.dec-tag.close{background:color-mix(in oklab,var(--warn) 18%,transparent);color:var(--warn)}
+.reply-copy{display:flex;align-items:center;flex-wrap:wrap;gap:12px;color:var(--ink2);font-size:.9375rem}
+.reply-copy .dec-copy{margin-left:0;font-size:.75rem;padding:7px 13px;color:var(--s2);border-color:color-mix(in oklab,var(--s2) 45%,var(--rule2))}
+@media print{.dec-copy,.reply-copy{display:none}}
 
 /* ===== contents pane: fixed, never part of the article's flow =====
    Wide windows: it sits in the article's reserved left gutter. Narrow windows: it slides over the page. */
